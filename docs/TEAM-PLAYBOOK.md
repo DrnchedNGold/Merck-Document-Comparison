@@ -1,107 +1,138 @@
 # Team Playbook — AI + Human Workflow
 
-Use this so everyone starts from the same context and agents don’t need you to re-explain the project.
+Teammates use this with Cursor Pro and BMad. **Do not commit or push** until the user asks to ship. Phrases like **“Push and open a PR”**, **“Create the pull request”**, or **“Ship this”** count as **full permission** to push the **feature branch** and open the PR — **not** to push directly to `main` (see **“Requests to push to `main`”** below).
 
-## 30-second orientation
+## One-time onboarding (same as `TEAM-WORKFLOW.md`)
 
-1. Pull latest `main`.
-2. Read in order: `README.md` → `docs/PRODUCT-DECISIONS.md` → your task in `docs/TASKS-V1.md` (and matching Jira issue if you use one).
-3. One branch = **one task id** (e.g. `task/T003-docx-reader`).
-4. Open a PR; fill `.github/pull_request_template.md` honestly (especially **Context Impact**).
+Use the **standard onboarding prompt** in `docs/TEAM-WORKFLOW.md` after clone. One run per person per machine is enough; after that, **pull `main`** and the repo files remain the authority—the AI should re-read relevant docs when starting a new task, without repeating the full onboarding essay unless the user asks.
 
-## Jira ↔ repo
+## Jira task format
 
-- **Jira** = assignment and sprint tracking.
-- **`docs/TASKS-V1.md`** = authoritative acceptance criteria and technical scope for v1.
-- Put the **task id** (e.g. `T007`) in the Jira title or description so implementers can jump straight to the right section.
+Tickets should be easy to turn into a branch name.
 
----
+- **Summary line:** `{KEY}-{number} {Short title}`  
+  Example: `MDC-24 Add a dark mode toggle`
 
-## Implementer: first message to Cursor / AI (copy-paste)
+**Git branch name** — `{KEY}-{number}-{kebab-title}`: hyphens, no spaces; **key and number as in Jira**. Title segment casing is **your choice** (all lowercase, title case, etc.).
 
-Customize `T00X` and the Jira key.
+| Jira summary (example) | Branch (examples) |
+|------------------------|-------------------|
+| `MDC-24 Add a dark mode toggle` | `MDC-24-add-a-dark-mode-toggle` or `MDC-24-Add-A-Dark-Mode-Toggle` |
+| `MDC-152 Remove scrollbar` | `MDC-152-remove-scrollbar` or `MDC-152-Remove-Scrollbar` |
+| `MDC-73 Update team docs` | `MDC-73-update-team-docs` or `MDC-73-Update-Team-Docs` |
 
-```text
-You are implementing ONE task only.
+Paste into chat when you start work:
 
-Grounding (read before changing code):
-- README.md
-- docs/PRODUCT-DECISIONS.md
-- docs/TEAM-WORKFLOW.md
-- docs/CONTEXT-CHANGE-POLICY.md
-- docs/TASKS-V1.md — section for task T00X only
+- Issue key (e.g. `MDC-24`)
+- Summary/title (full line above)
+- Description, acceptance criteria, attachments, links
+- Any files/components the ticket names
 
-Constraints:
-- Do not change docs/PRODUCT-DECISIONS.md or broaden v1 scope unless I explicitly ask.
-- Match default Word-compatible compare behavior as documented; no new product features outside this task.
-- If you would add pre-existing tracked-changes handling beyond “visible error and stop”, don’t — that’s out of scope for v1.
+## Start work on a task (copy-paste)
 
-Task: T00X (Jira: ABC-123 if applicable)
-
-Do this:
-1. Summarize acceptance criteria from TASKS-V1 for T00X in your own words (3–5 bullets).
-2. Propose a minimal file/change list.
-3. Implement and add or update tests as the task requires.
-4. Run checks you can (format, tests, linters) and report results.
-
-Do not ask me product questions answered in PRODUCT-DECISIONS or TASKS-V1; if something is truly ambiguous, state the gap and the smallest safe default.
-```
-
-## Implementer: follow-up if the agent drifts
+Replace the block with what Jira shows.
 
 ```text
-Stop. Scope check only T00X from docs/TASKS-V1.md. Revert or don’t add anything not in acceptance criteria. List what you’ll remove to get back to minimal scope.
+I’m implementing this Jira task only. Do not push to main.
+
+Jira: MDC-24
+Summary: MDC-24 Add a dark mode toggle
+Description:
+(paste)
+
+Acceptance criteria:
+(paste)
+
+Attachments / links:
+(paste)
+
+Before coding:
+1. Read docs/PRODUCT-DECISIONS.md and confirm this task fits v1 scope.
+2. If docs/TASKS-V1.md has a matching section, read only that section for extra acceptance language.
+3. Summarize scope in 3–5 bullets and list files you expect to touch.
+
+Then implement, add/update tests as appropriate, and run checks you can.
 ```
 
-## Master controller: direction / task update (copy-paste)
+## Context beyond task scope (AI / BMad — background check)
 
-Use when you want the team or an agent to reflect a **decision**, not random code churn.
+**Before committing**, the agent should check:
+
+- Does this work **edit any file** listed in `docs/CONTEXT-CHANGE-POLICY.md` under “What Counts As Project Context”?
+- Does it **change product scope or defaults** (platforms, file types, Track Changes semantics, Word parity) beyond what the Jira task says?
+
+If **yes**:
+
+1. **Stop** and tell the user clearly: what file or behavior would exceed the ticket.
+2. **Do not** silently commit context changes.
+3. In the eventual PR description, add a prominent **“Reviewer attention — possible out-of-scope context change”** section and **@DrnchedNGold** (or the reviewer your team uses).
+4. If the user wants to proceed anyway, they must confirm in chat; still tag the reviewer on the PR.
+
+If **no**: proceed and note in the PR body **“No project-context docs changed”** (or use the PR template checkboxes).
+
+## Requests to push to `main` (AI must warn and confirm)
+
+If the user (or a suggested command) would **push commits directly to `main`** — e.g. `git push origin main`, “push to main”, “merge my branch into main locally and push”, or being checked out on `main` with unpushed commits intended for `origin/main`:
+
+1. **Do not run the push** immediately.
+2. **Warn** clearly: normal task work must use a **named feature branch** and a **PR**; pushing straight to `main` bypasses review and breaks team workflow (`docs/TEAM-WORKFLOW.md`).
+3. **Offer the default path:** create/use the Jira-based branch, push that branch, open a PR into `main`.
+4. **Ask for explicit confirmation** to proceed with a direct `main` push anyway, e.g. require the user to type something unambiguous like **“Confirm: push directly to main”** or **“I accept pushing to main; proceed.”** Vague “ok” or “yes” alone is not enough — repeat what you are about to run and ask again.
+5. If they **do not** give that explicit confirmation, **only** execute the branch + PR flow (or stop).
+
+**Exception:** Trivial docs-only hotfixes *might* be allowed by your team; still use the same warning + explicit confirmation unless `docs/PRODUCT-DECISIONS.md` or reviewer policy says otherwise.
+
+## Ship: what the human says (default)
+
+The human already provided **Jira key + summary + description** when the task started. They should only need to say one of:
+
+- **“Push and open a PR”** / **“Create the pull request”** / **“Ship this”**
+
+**Agent behavior:** Use the **Jira key and summary from this conversation** (re-read the thread if needed). Do **not** ask the human to re-paste the ticket unless something is genuinely missing (e.g. no key was ever given).
+
+1. Base on latest `main` (pull/rebase as appropriate).
+2. Create a **new branch** using the **Jira key + number + kebab-case title** rule (see table under “Jira task format”). Examples: `MDC-24-add-a-dark-mode-toggle`, `MDC-152-remove-scrollbar`, `MDC-73-update-team-docs` (or the same with title-style caps if the team prefers).
+3. Commit with a message that includes the Jira key (e.g. `MDC-24: …`).
+4. **Push this branch only** (never `main`). **“Push and open a PR”** (or equivalent) is enough permission — do not ask for a second push approval.
+5. **Create the PR** to `main` and **fully populate** `.github/pull_request_template.md` from: Jira details in chat + `git diff` + files touched. Include Jira URL if the human pasted it; otherwise construct a clear **Jira: MDC-24** line and description.
+
+### Ship (optional explicit prompt)
+
+Use only if the human prefers to paste once more:
 
 ```text
-Update project context as follows (then implementation can follow):
-
-1. Edit docs/PRODUCT-DECISIONS.md with the new decision (one clear bullet).
-2. If task scope shifts, edit docs/TASKS-V1.md for the affected T00X rows only.
-3. Open a dedicated PR titled `docs: (short decision summary)` and tag @DrnchedNGold for review per CONTEXT-CHANGE-POLICY.
-
-Do not implement application code in this same PR unless I say so.
+Push and open a PR. Jira and summary are already above in this thread.
+Branch: slug from MDC-24 + title (kebab-case). Fill the PR template completely.
 ```
 
-## Master controller: small task tweak only
+## If push or PR creation fails
+
+The AI **cannot** push or open a PR unless **your machine and accounts** allow it. Common causes and fixes:
+
+| Issue | What to do |
+|--------|------------|
+| **No `git` push rights** | Confirm GitHub access to the repo; for HTTPS use a credential helper or PAT with `repo` scope; for SSH ensure `ssh -T git@github.com` works and your key is added to GitHub. |
+| **`gh` not installed** | Install [GitHub CLI](https://cli.github.com/), run `gh auth login`, then the agent can use `gh pr create` with a filled body. |
+| **`gh` not logged in** | Run `gh auth login` (same browser/account as the repo). |
+| **Org SSO / token** | Some orgs require authorizing the PAT or SSH key for SSO (GitHub → Settings → SSH and GPG keys / Fine-grained tokens). |
+| **Agent sandbox / no network** | Cursor (or the tool environment) may block network. Run `git push` and `gh pr create` **locally in your terminal**, or approve agent steps that request network permissions. |
+| **Fork workflow** | If you cloned a **fork**, push to **your fork’s branch**, then open PR **fork → upstream**; tell the AI which remote is `origin`. |
+| **Branch name rejected** | Extremely long names or reserved characters: shorten slug (keep `KEY-###-` prefix + short title). |
+
+**Fallback (human, ~2 minutes):** Push the branch yourself (`git push -u origin <branch>`), then on GitHub use **“Compare & pull request”** and paste a PR body the AI generated into the description field.
+
+If you want **one-command PRs** for the whole team, standardize on: **GitHub CLI installed + `gh auth login` + HTTPS or SSH push working** for this repository.
+
+## If the agent drifts
 
 ```text
-Only update docs/TASKS-V1.md for task T00X: (what to add or clarify).
-Keep PRODUCT-DECISIONS unchanged unless the v1 contract changes.
+Stop. Scope check: only what Jira MDC-24 describes. List anything you added that is not on the ticket and remove or split to another issue.
 ```
 
-## PR title / description snippets
+## Reviewer note
 
-**Title:** `T00X: short description` (e.g. `T003: DOCX package reader`)
+Product direction and approval of context-changing PRs are handled by a **reviewer** (see `docs/CONTEXT-CHANGE-POLICY.md`). This playbook does not define reviewer duties—only how implementers and AI escalate.
 
-**Body opener:**
+## BMad
 
-```text
-Task: T00X
-Jira: ABC-123 (if any)
-
-## What changed
-- ...
-
-## Tests
-- ...
-
-## Context Impact
-- [ ] No project-context docs changed
-(or checklist from PR template if docs changed)
-```
-
-## BMad / skills
-
-- Repo includes `_bmad/` for shared workflows. Use your normal BMad + Cursor setup; this playbook is the **minimal** path so any agent can work from markdown + code alone.
-- For heavy BMad workflows (PRD, architecture, story generation), use the skills you already installed; product **defaults and v1 guardrails** still live in `docs/PRODUCT-DECISIONS.md`.
-
-## When something is “missing”
-
-1. If it’s **product scope** → master updates `PRODUCT-DECISIONS.md` + PR.
-2. If it’s **task detail** → master updates `TASKS-V1.md` + PR (small is fine).
-3. If it’s **implementation detail** (e.g. library version) → implementer picks a reasonable default, notes it in PR; master only intervenes if it violates decisions.
+Use BMad skills when your team’s process calls for them. **Guardrails** in `docs/PRODUCT-DECISIONS.md` and **scope** on the Jira issue still win over ad-hoc agent suggestions.
