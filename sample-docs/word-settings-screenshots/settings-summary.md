@@ -1,11 +1,9 @@
 # Word compare baseline — settings summary
 
-Fill in **Word version** and **Windows version** after you verify (About Word / System).
-
 | Field | Value |
 |-------|--------|
-| Word version | _(e.g. Microsoft 365, build …)_ |
-| Windows version | _(e.g. Windows 11 23H2)_ |
+| Word version | _(fill: Microsoft 365 or perpetual + build from **File → Account → About Word**)_ |
+| Windows version | _(fill: e.g. Windows 11 23H2)_ |
 | Captured date | 2026-03-24 |
 
 ## Review — display (blank document baseline)
@@ -20,11 +18,12 @@ Fill in **Word version** and **Windows version** after you verify (About Word / 
 
 ## After Merck procedure (`RPP-400-ER01`)
 
-Per client instructions, balloon options adjusted so that under Balloons **only** **Show All Revisions Inline** is checked (record exact final checks below if different).
+Per client instructions, balloon options were adjusted so that under **Balloons** only **Show All Revisions Inline** is checked.
 
-_Final balloon checkboxes:_
+**Final balloon state (post-procedure):**
 
-- [ ] _(list each checked item after PDF steps)_
+- [x] Show All Revisions Inline — **on**
+- _(Uncheck other balloon modes so only the above remains, per PDF.)_
 
 ## Advanced options path (this Word build)
 
@@ -33,13 +32,16 @@ _Final balloon checkboxes:_
 
 **Screenshots in this folder:**
 
-- `Track-Changes-Options_and_Advanced-Track-Changes-Options.png` — both modals
-- `Compare-Documents-More.png` — Compare dialog with **More >>** expanded (file names in dialog can be any `.docx` pair)
+- `Track-Changes-Options_and_Advanced-Track-Changes-Options.png` — Track Changes Options + Advanced Track Changes Options
+- `Compare-Documents-More.png` — Compare dialog with **More >>** expanded
 
-## Compare dialog — record when you run a real compare
+## Compare dialog — still to transcribe (from screenshot)
 
-- Original document: _(older)_  
-- Revised document: _(newer)_  
-- Label changes with: _(blank per client PDF, or as used)_  
-- Show changes / Show changes in: _(from screenshot)_  
-- All **Comparisons** options (More >>): _(transcribe checked items from screenshot,)_
+_Open `Compare-Documents-More.png` and replace the placeholders below._
+
+- **Original document:** _(older / left side in dialog)_
+- **Revised document:** _(newer / right side)_
+- **Label changes with:** _(blank per client PDF, or note actual value)_
+- **Show changes:** _(e.g. at character / word level — from dialog)_
+- **Show changes in:** _(from dialog)_
+- **Comparisons** (all checkboxes under **More >>**): _(list each on/off)_

@@ -1,30 +1,28 @@
-# Pre-Push Checklist (First Team-Ready Push)
+# Repo and GitHub checklist
 
-Use this before pushing so teammates can clone and start tasks immediately.
+Use this for **ongoing** hygiene and for anyone bringing the repo to a “team-ready” state.
 
-## Repo content
+## Project context (keep current)
 
-- [ ] `docs/PRODUCT-DECISIONS.md` reflects current v1 scope and constraints.
-- [ ] `docs/TASKS-V1.md` is up to date (or matches what you copied into Jira).
-- [ ] `docs/TEAM-WORKFLOW.md` and `docs/CONTEXT-CHANGE-POLICY.md` are committed.
-- [ ] `docs/CAPTURE-WORD-COMPARE-SETTINGS.md` includes corrected navigation (Markup path) if different from client PDF.
-- [ ] `sample-docs/` contains client materials (PDF, diversity plan pairs, expected compare outputs).
-- [ ] **Word baseline:** Screenshots live under `sample-docs/word-settings-screenshots/` (see naming in capture doc).
-- [ ] **Word baseline:** `sample-docs/word-settings-screenshots/settings-summary.md` lists Word version, Windows build, and every checkbox value you care to mirror in software.
+- [ ] `docs/PRODUCT-DECISIONS.md` matches agreed v1 scope.
+- [ ] `docs/TASKS-V1.md` matches Jira (or your board) for active work.
+- [ ] `docs/TEAM-WORKFLOW.md` and `docs/TEAM-PLAYBOOK.md` still describe how you work.
+- [ ] `docs/CONTEXT-CHANGE-POLICY.md` changelog updated when governance changes.
+
+## Word baseline (optional refinements)
+
+- [ ] `sample-docs/word-settings-screenshots/settings-summary.md` has **Word + OS version** filled in.
+- [ ] Compare dialog options transcribed from `Compare-Documents-More.png` into `settings-summary.md`.
+
+See `docs/CAPTURE-WORD-COMPARE-SETTINGS.md` for what is already captured vs optional follow-ups.
 
 ## GitHub
 
-- [ ] `.github/CODEOWNERS` uses your real GitHub username (update if not `DrnchedNGold`).
-- [ ] Branch protection on `main` (recommended): require PR, require review from code owners for protected paths, optional status checks once CI exists.
-- [ ] Teammates invited with **write** access (or fork + PR workflow documented).
-- [ ] No secrets in repo (no API keys, tokens, or client confidential paths you should not share).
+- [ ] `.github/CODEOWNERS` lists the correct GitHub user for reviews (`@DrnchedNGold`).
+- [ ] Branch protection on `main` (recommended): require PR, require review from code owners where applicable.
+- [ ] Teammates have access (write or fork + PR, per your policy).
+- [ ] No secrets in the repo.
 
-## Optional before push
+## First-time teammate
 
-- [ ] `README.md` points at all context docs (already should).
-- [ ] One commit message that makes clear: “Initial context + samples for team execution.”
-
-## After first push (you said next)
-
-- [ ] Add `docs/TEAM-PLAYBOOK.md` (copy/paste prompts for you vs teammates).
-- [ ] Post in team channel: clone URL, “read docs in README order,” and Jira board link.
+- [ ] Point them at `README.md` then `docs/TEAM-PLAYBOOK.md` before their first task.

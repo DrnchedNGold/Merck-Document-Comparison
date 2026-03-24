@@ -1,59 +1,32 @@
-# How To Capture Word Compare Settings (For Baseline Parity)
+# Word compare baseline — status and follow-ups
 
-Use this checklist to capture the exact Word settings your client uses, so engineering can replicate behavior.
+The **initial capture is done**: screenshots and a written summary live under `sample-docs/word-settings-screenshots/`. Use this file for **what is left to transcribe** (if anything) and **how to re-capture** on another Word build or OS.
 
-## Goal
-Provide screenshots and values for all relevant Word comparison settings.
+## Where the baseline lives
 
-## Prerequisites
-- Microsoft Word installed.
-- Any two sample `.docx` documents.
-- Save screenshots to `sample-docs/word-settings-screenshots/`.
+| Artifact | Location |
+|----------|----------|
+| Screenshots | `sample-docs/word-settings-screenshots/*.png` |
+| Written summary | `sample-docs/word-settings-screenshots/settings-summary.md` |
+| Client procedure PDF | `sample-docs/Merck_Create_Compare_Document_extracted_from_RPP-400-ER01.pdf` |
 
-## Correct path to Advanced Options
+## Done (for this project)
 
-The client PDF (`RPP-400-ER01`) may describe **Review > Tracking > Track Changes Options**. On current Word builds the **Advanced Track Changes Options** dialog is typically under:
+- Blank-doc Review defaults recorded in `settings-summary.md` (Show Markup, Balloons baseline, Specific People).
+- Merck procedure: balloons adjusted so **only** **Show All Revisions Inline** is checked (per client PDF flow).
+- Correct UI path for advanced options documented: **`Markup` → `Track Changes Options` → `Advanced Options`** (client PDF may say `Review` → `Tracking` depending on Word version).
+- Screenshots: Track Changes / Advanced Track Changes modals, and Compare **More >>** dialog.
 
-**`Markup` > `Track Changes Options` > `Advanced Options`**
+## Remaining (optional but useful for engineering parity)
 
-(Use whatever your Word UI shows; capture screenshots either way.)
+Complete these in `settings-summary.md` when you have a minute — they make automated “match Word” tests easier:
 
-## Step-by-Step
+1. **Word version** and **Windows version** (exact build from Word About + OS).
+2. **Final balloon checklist** — confirm the post–Merck-procedure row matches Word (check boxes in `settings-summary.md`).
+3. **Compare dialog transcription** — from `Compare-Documents-More.png`, list every checked option under **Comparisons** and values for **Show changes** / **Show changes in** / **Label changes with**.
 
-1. Open Microsoft Word with a blank document.
-2. Go to `Review` tab (or your Word equivalent for markup/tracking).
-3. Set display mode to `All Markup`.
-4. Open `Show Markup` and record checked items. Example baseline on blank doc:
-   - **Insertions and Deletions**: checked  
-   - **Formatting**: checked  
-5. Open `Balloons` submenu and record checked items. Example baseline on blank doc:
-   - **Show Only Formatting in Balloons**: checked  
-   Under **Specific People**, record e.g. **All Reviewers** if selected.
-6. When following `Merck_Create_Compare_Document_extracted_from_RPP-400-ER01.pdf`, align balloon behavior with their process: after changes, **only** `Show All Revisions Inline` should be checked under Balloons (per client instructions — record your final state in `settings-summary.md`).
-7. Open **`Markup` > `Track Changes Options` > `Advanced Options`** (or equivalent).
-   - Screenshot both **Track Changes Options** and **Advanced Track Changes Options** if they are separate modals.
-   - Write down key values in `settings-summary.md`.
-8. Go to `Review` > `Compare` > `Compare...`.
-   - Click `More >>`.
-   - Take a full screenshot of this expanded dialog (sample files may be placeholders; any two `.docx` files are fine).
-   - Record all checked/unchecked comparison options.
-9. In the same Compare dialog, record:
-   - Which document is set as Original and Revised.
-   - "Label changes with" value (if blank or populated).
-   - "Show changes" and "Show changes in" settings.
-10. Save screenshots with clear names, for example:
-   - `01-tracking-all-markup.png`
-   - `02-track-changes-advanced-options.png`
-   - `03-compare-dialog-expanded.png`
+## Re-capture later (new teammate or new Word version)
 
-## Optional But Useful
-- Repeat for Word on both Windows and macOS if available.
-- Add Word version number (e.g., Word 365 build/version) in a note file.
-
-## Deliverables To Commit
-- Screenshot files under `sample-docs/word-settings-screenshots/`
-- A summary file `sample-docs/word-settings-screenshots/settings-summary.md` containing:
-  - Word version
-  - OS
-  - Exact checked options
-  - Any ambiguous or unclear settings
+1. Follow `sample-docs/Merck_Create_Compare_Document_extracted_from_RPP-400-ER01.pdf` on the target Word install.
+2. Save new PNGs alongside existing ones (use dated names if you keep both, e.g. `Compare-More-2026-06.png`).
+3. Update `settings-summary.md` with Word/OS version and any checkbox differences.
