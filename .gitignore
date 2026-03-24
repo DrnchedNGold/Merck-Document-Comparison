@@ -1,0 +1,10 @@
+# Microsoft Word lock / owner files (never commit)
+~$*
+**/~$*
+
+# Local editor (optional machine-specific)
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

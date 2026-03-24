@@ -1,0 +1,12 @@
+# Default owner for all files
+* @DrnchedNGold
+
+# Context and direction documents require master-controller review
+/docs/PRODUCT-DECISIONS.md @DrnchedNGold
+/docs/TEAM-WORKFLOW.md @DrnchedNGold
+/docs/TASKS-V1.md @DrnchedNGold
+/docs/CAPTURE-WORD-COMPARE-SETTINGS.md @DrnchedNGold
+/docs/CONTEXT-CHANGE-POLICY.md @DrnchedNGold
+/docs/PRE-PUSH-CHECKLIST.md @DrnchedNGold
+/README.md @DrnchedNGold
+/sample-docs/word-settings-screenshots/settings-summary.md @DrnchedNGold
