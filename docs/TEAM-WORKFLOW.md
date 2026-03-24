@@ -18,6 +18,7 @@ All team members should read these first:
 - `docs/TASKS-V1.md`
 - `docs/CAPTURE-WORD-COMPARE-SETTINGS.md`
 - `docs/CONTEXT-CHANGE-POLICY.md`
+- `docs/TEAM-PLAYBOOK.md` (ready-made prompts for Cursor / AI)
 
 ## Cursor + BMad Working Pattern
 1. Pull latest `main`.

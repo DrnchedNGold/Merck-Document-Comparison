@@ -2,6 +2,8 @@
 
 Use these tasks as implementation units. Each task is intentionally scoped for one PR.
 
+**How to run a task with AI:** see `docs/TEAM-PLAYBOOK.md` (copy-paste “Implementer: first message”). Mirror task ids in Jira if you use Jira for assignment.
+
 ## T001 - Scaffold Monorepo Structure
 **Goal:** Create initial folders for engine, desktop app, test corpus, and scripts.  
 **Acceptance Criteria:**

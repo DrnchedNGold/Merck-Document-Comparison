@@ -7,6 +7,7 @@ Use this policy to keep team members aligned and ensure master-controller approv
 - `docs/TEAM-WORKFLOW.md`
 - `docs/TASKS-V1.md`
 - `docs/CAPTURE-WORD-COMPARE-SETTINGS.md`
+- `docs/TEAM-PLAYBOOK.md` (team process and AI prompts)
 - `README.md` (context links and project framing)
 
 ## Rules
@@ -29,3 +30,4 @@ Treat these as significant and require explicit verification:
 Keep a short history of significant context updates.
 
 - 2026-03-24: Initial policy created. Master-controller model and Word-parity v1 scope in effect.
+- 2026-03-24: Added `docs/TEAM-PLAYBOOK.md` for shared AI/human prompts; listed under project context files.
