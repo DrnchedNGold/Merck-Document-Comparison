@@ -1,10 +1,29 @@
 # Merck-Document-Comparison
 
-Shared project context for team execution lives in:
-- `docs/PRODUCT-DECISIONS.md`
-- `docs/TEAM-WORKFLOW.md`
-- `docs/TASKS-V1.md`
-- `docs/CAPTURE-WORD-COMPARE-SETTINGS.md` (Word baseline status + optional follow-ups)
-- `docs/CONTEXT-CHANGE-POLICY.md`
-- `docs/PRE-PUSH-CHECKLIST.md` (ongoing repo/GitHub hygiene)
-- `docs/TEAM-PLAYBOOK.md` (copy-paste prompts for AI + humans)
+**Goal:** Compare two Word `.docx` files and produce a new document with **Track Changes** markup, with better behavior on tables/headers and formatting noise than a naive compare.
+
+---
+
+## Start here
+
+| Role | Read first |
+|------|------------|
+| **Implementer** | [`docs/TEAM-WORKFLOW.md`](docs/TEAM-WORKFLOW.md) → [`docs/V1-ACCEPTANCE-CATALOG.md`](docs/V1-ACCEPTANCE-CATALOG.md) (pick a **`MDC-###`** issue in Jira) |
+| **Reviewer / PM** | [`docs/PRODUCT-DECISIONS.md`](docs/PRODUCT-DECISIONS.md) → [`docs/CONTEXT-CHANGE-POLICY.md`](docs/CONTEXT-CHANGE-POLICY.md) |
+| **Big picture** | [`docs/PROJECT-PLAN-V1.md`](docs/PROJECT-PLAN-V1.md) |
+
+**AI + Cursor:** [`docs/TEAM-PLAYBOOK.md`](docs/TEAM-PLAYBOOK.md)  
+**BMad (when to use which workflow):** [`docs/BMAD-USAGE.md`](docs/BMAD-USAGE.md)  
+**Jira vs Markdown backlog:** [`docs/JIRA-AND-BACKLOG.md`](docs/JIRA-AND-BACKLOG.md)
+
+---
+
+## More docs
+
+- [`docs/CAPTURE-WORD-COMPARE-SETTINGS.md`](docs/CAPTURE-WORD-COMPARE-SETTINGS.md) — Word baseline status + follow-ups  
+- [`docs/PRE-PUSH-CHECKLIST.md`](docs/PRE-PUSH-CHECKLIST.md) — repo / GitHub hygiene  
+- [`docs/AI-PROMPTS-INDEX.md`](docs/AI-PROMPTS-INDEX.md) — all copy/paste AI prompts
+- [`docs/ADD-JIRA-TASKS-PROMPT.md`](docs/ADD-JIRA-TASKS-PROMPT.md) — generate Jira-ready task suggestions from the repo state
+- [`sample-docs/`](sample-docs/) — client PDF + example compare pairs  
+
+**BMad epics mirror (sprint tooling):** `_bmad-output/planning-artifacts/epics-v1.md`

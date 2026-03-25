@@ -5,7 +5,7 @@ Use this for **ongoing** hygiene and for anyone bringing the repo to a “team-r
 ## Project context (keep current)
 
 - [ ] `docs/PRODUCT-DECISIONS.md` matches agreed v1 scope.
-- [ ] `docs/TASKS-V1.md` matches Jira (or your board) for active work.
+- [ ] `docs/V1-ACCEPTANCE-CATALOG.md` matches Jira: same **`MDC-### Title`** summaries (or your project key) for active work.
 - [ ] `docs/TEAM-WORKFLOW.md` and `docs/TEAM-PLAYBOOK.md` still describe how you work.
 - [ ] `docs/CONTEXT-CHANGE-POLICY.md` changelog updated when governance changes.
 
