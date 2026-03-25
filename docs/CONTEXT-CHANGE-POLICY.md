@@ -3,11 +3,13 @@
 Use this policy so **project context** stays controlled and **reviewers** can approve meaningful changes.
 
 ## What Counts As "Project Context"
+- `docs/PROJECT-PLAN-V1.md`
 - `docs/PRODUCT-DECISIONS.md`
 - `docs/TEAM-WORKFLOW.md`
-- `docs/TASKS-V1.md`
+- `docs/V1-ACCEPTANCE-CATALOG.md`
 - `docs/CAPTURE-WORD-COMPARE-SETTINGS.md`
 - `docs/TEAM-PLAYBOOK.md` (team process and AI prompts)
+- `docs/BMAD-USAGE.md` (BMad workflow pointers)
 - `README.md` (context links and project framing)
 
 ## Rules
@@ -32,3 +34,4 @@ Keep a short history of significant context updates.
 - 2026-03-24: Initial policy created. Reviewer-gated context and Word-parity v1 scope in effect.
 - 2026-03-24: Added `docs/TEAM-PLAYBOOK.md` for shared AI/human prompts; listed under project context files.
 - 2026-03-24: Team workflow updated: Jira-first tasks, feature branches + PRs (not direct `main`), reviewer wording; AI escalation for out-of-scope context edits.
+- 2026-03-24: Added `docs/PROJECT-PLAN-V1.md` and expanded `docs/V1-ACCEPTANCE-CATALOG.md` with sprint/phase mapping; internal planning IDs use **MDC-###**.

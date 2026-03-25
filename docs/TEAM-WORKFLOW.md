@@ -6,22 +6,7 @@ This document is for **everyone implementing work** after clone, BMad, and Curso
 
 After you clone the repo, run **once** in Cursor chat (or your usual AI panel). You do not need to repeat this for every task; later sessions stay aligned by reading files in the repo when you work.
 
-**Standard onboarding prompt (copy-paste):**
-
-```text
-This is my first session on this repository. Load full project context before we do any tasks.
-
-Read in order (use the repo files, don’t guess):
-1. README.md
-2. docs/PRODUCT-DECISIONS.md
-3. docs/TEAM-WORKFLOW.md (this file)
-4. docs/CONTEXT-CHANGE-POLICY.md
-5. docs/TEAM-PLAYBOOK.md
-6. docs/TASKS-V1.md (skim structure; you’ll deep-read per task later)
-7. sample-docs/ — note what client reference materials exist
-
-Then give a short summary: goal, v1 scope, guardrails, and where tasks live (Jira vs docs/TASKS-V1.md). Do not write code yet.
-```
+**Standard onboarding prompt (copy-paste):** see [`AI-PROMPTS-INDEX.md → One-time onboarding`](AI-PROMPTS-INDEX.md#prompt-onboarding).
 
 The AI (and BMad, when you invoke it) should use **what is committed in the repo** as source of truth. Pull `main` when it moves so your workspace matches the latest context.
 
@@ -46,7 +31,7 @@ Do **not** push task work directly to `main`. If you ask the AI to push to `main
 
 Tell the AI something short, for example:
 
-- **“Push and open a PR”** (this alone is enough for the full ship: branch, push, and PR — no extra approval step)
+- **“Push and open a PR”** (this alone is enough for the full ship: branch, push, and PR — no extra approval step; ship prompt is in [`AI-PROMPTS-INDEX.md → Ship`](AI-PROMPTS-INDEX.md#prompt-ship))
 - **“Create the pull request”**  
 - **“Ship this”**
 
@@ -61,11 +46,11 @@ The AI should then, using **this chat thread + the repo** (Jira details you alre
 
 Pattern: **`{KEY}-{number}-{short-description-in-kebab-case}`** — hyphens between words, **no spaces**. Use the **key and number exactly as in Jira**. For the title segment, **letter case is not prescribed** (e.g. all lowercase or title-style caps are both fine; stay consistent with your Jira summary if you prefer).
 
-| Jira summary (example) | Branch name (examples) |
-|------------------------|------------------------|
-| `MDC-24 Add a dark mode toggle` | `MDC-24-add-a-dark-mode-toggle` or `MDC-24-Add-A-Dark-Mode-Toggle` |
-| `MDC-152 Remove scrollbar` | `MDC-152-remove-scrollbar` or `MDC-152-Remove-Scrollbar` |
-| `MDC-73 Update team docs` | `MDC-73-update-team-docs` or `MDC-73-Update-Team-Docs` |
+| Jira summary (example, from `V1-ACCEPTANCE-CATALOG.md`) | Branch (examples) |
+|---------------------------------------------|---------------------|
+| `MDC-001 Monorepo scaffold and README` | `MDC-001-monorepo-scaffold-and-readme` |
+| `MDC-007 Inline diff for runs` | `MDC-007-inline-diff-for-runs` |
+| `MDC-015 Engine CLI and open output` | `MDC-015-engine-cli-and-open-output` |
 
 Drop filler words only if needed to keep the slug readable.
 
@@ -75,9 +60,10 @@ If the AI says it **cannot** push or create the PR, see **`docs/TEAM-PLAYBOOK.md
 
 ## Where extra detail lives
 
-- **Jira** — what you are doing *now* (key, title, description, acceptance criteria).
-- **`docs/TASKS-V1.md`** — backlog shape and technical acceptance language for v1; use it when the ticket points there or when you need the full task write-up.
+- **Jira** — active issue: key + summary (e.g. **`MDC-007 Inline diff for runs`**) + description + acceptance criteria.
+- **`docs/V1-ACCEPTANCE-CATALOG.md`** — V1 acceptance criteria reference catalog; use the section that matches your issue title when you need acceptance language.
 - **`docs/TEAM-PLAYBOOK.md`** — copy-paste prompts for tasks, shipping, and scope recovery.
+- **`docs/BMAD-USAGE.md`** — which BMad skills to use for planning, stories, review, tests.
 
 ## Guardrails (quick reference)
 
