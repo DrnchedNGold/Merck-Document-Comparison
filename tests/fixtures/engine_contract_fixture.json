@@ -1,0 +1,44 @@
+{
+  "original_body_ir": {
+    "version": 1,
+    "blocks": [
+      {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [
+          {
+            "text": "The quick brown fox."
+          }
+        ]
+      }
+    ]
+  },
+  "revised_body_ir": {
+    "version": 1,
+    "blocks": [
+      {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [
+          {
+            "text": "The quick brown fox jumps."
+          }
+        ]
+      }
+    ]
+  },
+  "compare_config": {
+    "ignore_case": false,
+    "ignore_whitespace": false,
+    "ignore_formatting": true,
+    "detect_moves": false
+  },
+  "expected_diff_ops": [
+    {
+      "op": "replace",
+      "path": "blocks/0/runs/0",
+      "before": "The quick brown fox.",
+      "after": "The quick brown fox jumps."
+    }
+  ]
+}
