@@ -2,11 +2,11 @@
 
 This document is for **everyone implementing work** after clone, BMad, and Cursor Pro are set up.
 
-## One-time: load project context into the AI
+## Task kickoff: refresh project context in the AI
 
-After you clone the repo, run **once** in Cursor chat (or your usual AI panel). You do not need to repeat this for every task; later sessions stay aligned by reading files in the repo when you work.
+At the start of each new task, run the context refresh prompt in Cursor chat (or your usual AI panel). This keeps both docs and current code state fresh in the AI context before implementation.
 
-**Standard onboarding prompt (copy-paste):** see [`AI-PROMPTS-INDEX.md → One-time onboarding`](AI-PROMPTS-INDEX.md#prompt-onboarding).
+**Task kickoff context refresh prompt (copy-paste):** see [`AI-PROMPTS-INDEX.md → Task kickoff context refresh`](AI-PROMPTS-INDEX.md#prompt-onboarding).
 
 The AI (and BMad, when you invoke it) should use **what is committed in the repo** as source of truth. Pull `main` when it moves so your workspace matches the latest context.
 
