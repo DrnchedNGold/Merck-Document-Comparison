@@ -4,6 +4,36 @@
 
 ---
 
+## Repo baseline scaffold
+
+Top-level layout used for the monorepo baseline:
+
+- `engine/` - backend/core comparison logic
+- `desktop/` - desktop application shell
+- `tests/` - repository-level tests
+
+## Install deps and run tests
+
+Recommended (fully automated, no host Python setup required):
+
+```bash
+make test
+```
+
+This runs tests in Docker with Python 3.12+.
+
+Host-local option (if you prefer a local venv):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
+
+---
+
 ## Start here
 
 | Role | Read first |
