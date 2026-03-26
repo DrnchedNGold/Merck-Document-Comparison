@@ -12,6 +12,7 @@ from .contracts import (
     validate_compare_config,
     validate_diff_ops,
 )
+from .docx_body_ingest import DocumentXmlMissingError, parse_docx_body_ir
 
 __all__ = [
     "ALLOWED_DIFF_OPS",
@@ -21,6 +22,8 @@ __all__ = [
     "BodyRun",
     "CompareConfig",
     "DiffOp",
+    "DocumentXmlMissingError",
+    "parse_docx_body_ir",
     "validate_body_ir",
     "validate_compare_config",
     "validate_diff_ops",
