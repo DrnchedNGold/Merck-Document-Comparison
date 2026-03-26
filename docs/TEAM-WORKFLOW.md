@@ -40,7 +40,7 @@ The AI should then, using **this chat thread + the repo** (Jira details you alre
 1. Create a **new branch** using the **branch naming rule** below (Jira key + issue number + kebab-case words from the title; **no spaces**).
 2. **Commit** the work with a message that references the Jira key.
 3. **Push that branch only** (never `main`).
-4. **Open a Pull Request** into `main` and **fill** `.github/pull_request_template.md` completely: Jira link, branch name, scope, tests, context-impact checkboxes, and reviewer tags when required by `docs/CONTEXT-CHANGE-POLICY.md`.
+4. **Open a Pull Request** into `main` and **fill** `.github/pull_request_template.md` completely: Jira link, branch name, and a **plain-text concise summary** of what changed and why. If required details are missing, ask the user in chat.
 
 ### Branch naming rule (examples)
 

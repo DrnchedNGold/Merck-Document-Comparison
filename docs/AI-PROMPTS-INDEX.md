@@ -97,6 +97,9 @@ Do:
 4. Open a PR into main and fill .github/pull_request_template.md completely from:
    - Jira details from chat
    - git diff / files touched
+   - Use a short, clear PR title (does not need to match branch name)
+   - Description must be plain text only and concise; explain what changed and why
+   - If required details are missing, ask the user in chat
 5. If any step fails, use the troubleshooting section in TEAM-PLAYBOOK.md.
 ```
 
