@@ -1,0 +1,5 @@
+[project]
+name = "merck-document-comparison"
+version = "0.1.0"
+requires-python = ">=3.12"
+description = "Monorepo baseline for the Merck document comparison project."
