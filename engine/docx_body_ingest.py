@@ -32,6 +32,23 @@ class DocumentXmlMissingError(Exception):
         return f"Missing {self.missing_path} in '{self.docx_path}'."
 
 
+def load_word_document_xml_root(docx_path: Union[str, Path]) -> ET.Element:
+    """Load and parse `word/document.xml` from a `.docx` into an XML root.
+
+    This helper is shared by preflight validation and body ingest so their
+    XML parsing behavior stays consistent.
+    """
+
+    path = Path(docx_path)
+    with zipfile.ZipFile(path, "r") as zf:
+        try:
+            document_xml = zf.read("word/document.xml")
+        except KeyError as e:
+            raise DocumentXmlMissingError(path) from e
+
+    return ET.fromstring(document_xml)
+
+
 def parse_docx_body_ir(docx_path: Union[str, Path]) -> BodyIR:
     """
     Parse `word/document.xml` from a `.docx` and convert it into `BodyIR`.
@@ -42,14 +59,7 @@ def parse_docx_body_ir(docx_path: Union[str, Path]) -> BodyIR:
     - Each run's text is the concatenation of all `w:t` text nodes under `w:r`.
     """
 
-    path = Path(docx_path)
-    with zipfile.ZipFile(path, "r") as zf:
-        try:
-            document_xml = zf.read("word/document.xml")
-        except KeyError as e:
-            raise DocumentXmlMissingError(path) from e
-
-    root = ET.fromstring(document_xml)
+    root = load_word_document_xml_root(docx_path)
 
     paragraphs = root.findall(".//w:p", NS)
     blocks: list[BodyParagraph] = []
