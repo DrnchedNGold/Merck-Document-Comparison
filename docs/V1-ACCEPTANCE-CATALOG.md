@@ -125,8 +125,9 @@ Estimate: `M`
 Acceptance criteria
 
 - Script/pytest module runs engine against `sample-docs` pairs (paths configurable)
+- Coverage includes `sample-docs/email1docs/`, `sample-docs/email2docs/`, and `sample-docs/email3docs/` sources
 - Report revision counts/locations by part (document vs headers)
-- README note: start with bladder pair if cervical is too strict initially
+- README note: start with one stable pair, then expand to all corpora
 Estimate: `M`
 
 ### MDC-013 CI pipeline

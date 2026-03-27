@@ -55,3 +55,15 @@ Per `docs/PRODUCT-DECISIONS.md`:
 - `docs/V1-ACCEPTANCE-CATALOG.md` — acceptance criteria by MDC task under 5 sprints
 - `docs/TEAM-WORKFLOW.md` / `docs/TEAM-PLAYBOOK.md` — team process and AI prompts
 - `sample-docs/` — client procedure + expected compare outputs
+- `sample-docs/CORPUS-INVENTORY.md` — combined email1/email2/email3 corpus details
+
+## SCRUM-40 corpus direction
+
+With `email2docs/` and `email3docs/` included, planning and implementation should:
+
+- Use all email corpora for acceptance and regression expectations.
+- Keep engine design document-agnostic across templates and sponsor formats.
+- Treat generated compare documents as reference outcomes (not source-input happy paths).
+- Prioritize robustness for large structured docs (tables, headers/footers) seen in Protocol/IB samples.
+- Treat all `email#docs` folders as one unified real-world corpus; complexity tiers expand test scope but do not replace earlier-tier behavior requirements.
+- Maintain non-regression expectations across simpler, mid-complexity, and high-complexity samples when evolving comparison logic.

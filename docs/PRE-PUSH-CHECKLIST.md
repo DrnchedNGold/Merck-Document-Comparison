@@ -11,7 +11,7 @@ Use this for **ongoing** hygiene and for anyone bringing the repo to a “team-r
 
 ## Word baseline (optional refinements)
 
-- [ ] `sample-docs/word-settings-screenshots/settings-summary.md` has **Word + OS version** filled in.
+- [ ] `sample-docs/email1docs/word-settings-screenshots/settings-summary.md` has **Word + OS version** filled in.
 - [ ] Compare dialog options transcribed from `Compare-Documents-More.png` into `settings-summary.md`.
 
 See `docs/CAPTURE-WORD-COMPARE-SETTINGS.md` for what is already captured vs optional follow-ups.

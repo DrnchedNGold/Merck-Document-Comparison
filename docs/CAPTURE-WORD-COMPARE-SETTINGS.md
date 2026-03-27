@@ -1,14 +1,14 @@
 # Word compare baseline — status and follow-ups
 
-The **initial capture is done**: screenshots and a written summary live under `sample-docs/word-settings-screenshots/`. Use this file for **what is left to transcribe** (if anything) and **how to re-capture** on another Word build or OS.
+The **initial capture is done**: screenshots and a written summary live under `sample-docs/email1docs/word-settings-screenshots/`. Use this file for **what is left to transcribe** (if anything) and **how to re-capture** on another Word build or OS.
 
 ## Where the baseline lives
 
 | Artifact | Location |
 |----------|----------|
-| Screenshots | `sample-docs/word-settings-screenshots/*.png` |
-| Written summary | `sample-docs/word-settings-screenshots/settings-summary.md` |
-| Client procedure PDF | `sample-docs/Merck_Create_Compare_Document_extracted_from_RPP-400-ER01.pdf` |
+| Screenshots | `sample-docs/email1docs/word-settings-screenshots/*.png` |
+| Written summary | `sample-docs/email1docs/word-settings-screenshots/settings-summary.md` |
+| Client procedure PDF | `sample-docs/email1docs/Merck_Create_Compare_Document_extracted_from_RPP-400-ER01.pdf` |
 
 ## Done (for this project)
 
@@ -27,6 +27,6 @@ Complete these in `settings-summary.md` when you have a minute — they make aut
 
 ## Re-capture later (new teammate or new Word version)
 
-1. Follow `sample-docs/Merck_Create_Compare_Document_extracted_from_RPP-400-ER01.pdf` on the target Word install.
+1. Follow `sample-docs/email1docs/Merck_Create_Compare_Document_extracted_from_RPP-400-ER01.pdf` on the target Word install.
 2. Save new PNGs alongside existing ones (use dated names if you keep both, e.g. `Compare-More-2026-06.png`).
 3. Update `settings-summary.md` with Word/OS version and any checkbox differences.
