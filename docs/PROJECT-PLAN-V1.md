@@ -33,6 +33,16 @@ Sprints below group the same phases into ~5 time windows so the team can plan an
 | Sprint 4 | Phase 3.2 + Phase 4 verification | MDC-011, MDC-012, MDC-013 |
 | Sprint 5 | Desktop MVP (Phase 5) + stretch | MDC-014, MDC-015, MDC-016, MDC-017, MDC-018 |
 
+## Sprint 2 — implementation map (Phase 1 / body compare)
+
+Verification note: `docs/SCRUM-48-SPRINT2-AUDIT.md` (SCRUM-48) confirms catalog acceptance for MDC-005–007 against the repo.
+
+| Catalog | Engine module(s) | Tests |
+|--------|-------------------|--------|
+| MDC-005 | `engine/compare_keys.py`, compare profile in `engine/contracts.py` | `tests/test_compare_keys.py` |
+| MDC-006 | `engine/paragraph_alignment.py` | `tests/test_paragraph_alignment.py` |
+| MDC-007 | `engine/inline_run_diff.py` | `tests/test_inline_run_diff.py` |
+
 ## Dependency sketch (simplified)
 
 ```text

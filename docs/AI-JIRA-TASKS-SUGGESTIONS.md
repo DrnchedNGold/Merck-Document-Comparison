@@ -139,6 +139,13 @@
   - Add tests: insert/delete/replace within one paragraph
   - Ensure diff ops are emitted in deterministic order for stable output
 
+### Optional follow-ups (Sprint 2 — after SCRUM-48 audit)
+
+These are **not** required to meet MDC-005–007 acceptance; open separate Jira items if prioritized.
+
+- **Full-body orchestration:** one engine entry point that runs `align_paragraphs`, then `inline_diff_single_paragraph` for each alignment row with both paragraph indices set (plus small `BodyIR` slice helpers).
+- **Alignment refinement:** if same visible text split across runs mis-aligns paragraphs, consider stronger paragraph matching (document tradeoffs first).
+
 ---
 
 ## Sprint 3 — Structured content + minimal Track Changes

@@ -37,3 +37,4 @@ Keep a short history of significant context updates.
 - 2026-03-24: Added `docs/PROJECT-PLAN-V1.md` and expanded `docs/V1-ACCEPTANCE-CATALOG.md` with sprint/phase mapping; internal planning IDs use **MDC-###**.
 - 2026-03-26: SCRUM-40 corpus update: recognized combined `email1docs/` + `email2docs/` samples, added `sample-docs/CORPUS-INVENTORY.md`, and aligned sample-doc path references in docs.
 - 2026-03-26: SCRUM-40 expanded with `email3docs/` (Protocol + IB corpus); updated planning/context docs and corpus expectations to include all three email sample sets.
+- 2026-03-27: SCRUM-48 added Sprint 2 implementation map to `docs/PROJECT-PLAN-V1.md` and `docs/SCRUM-48-SPRINT2-AUDIT.md` for MDC-005–007 verification traceability.
