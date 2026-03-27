@@ -22,8 +22,8 @@
 
 These are **engineering hardening** or **later orchestration**, not acceptance gaps for MDC-005–007.
 
-1. **Full-body orchestration:** A single public API that runs `align_paragraphs` over two `BodyIR`s, then runs `inline_diff_single_paragraph` for each alignment row where both indices are non-null (with paragraph extraction helpers). Useful for CLI/desktop later; not specified in Sprint 2 acceptance text.
-2. **Alignment vs run-split:** Paragraph signatures depend on per-run compare keys. Two paragraphs with the **same concatenated text** but **different run boundaries** can produce different signatures and may not align as the same paragraph under LCS. If that becomes a real-world issue, consider a catalog task to align on concatenated paragraph text, normalize run splits, or document the limitation.
+1. **Full-body orchestration:** Implemented as optional API in `engine/body_compare.py` (`matched_paragraph_inline_diffs`, `single_paragraph_body`). See `docs/AI-JIRA-TASKS-SUGGESTIONS.md` — Sprint 2 optional task **Full-body compare orchestration** for Jira wording.
+2. **Alignment vs run-split:** Still **open optional** work — paragraph signatures depend on per-run compare keys; same concatenated text with different run splits may not LCS-align. Tracked as optional task **Paragraph alignment signature refinement** in `docs/AI-JIRA-TASKS-SUGGESTIONS.md`.
 
 ---
 

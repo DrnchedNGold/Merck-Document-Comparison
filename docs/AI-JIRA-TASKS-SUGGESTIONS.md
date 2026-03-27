@@ -77,6 +77,46 @@
   - Add unit tests for each failure mode
   - Keep error messages deterministic for later CLI/desktop wiring
 
+### Epic: Foundation — Optional hardening
+
+#### Task: Preflight error taxonomy for CLI/desktop (optional)
+- Sprint: Foundation Setup
+- Epic name: Foundation — Optional hardening
+- Optional: yes
+- Description:
+  - Objective: Stable machine-readable error codes (or enums) for each preflight failure so CLI/desktop can map messages without string parsing.
+  - Scope:
+    - Parallel with: None
+    - Depends on: Preflight validation
+  - Acceptance criteria:
+    - Each failure mode maps to a stable code or exception type documented for integrators
+    - Unit tests assert codes for non-docx, invalid zip, missing document.xml, tracked changes, comments
+  - Validation/tests:
+    - pytest covers code mapping; docs note contract in engine README or CONTRACTS follow-up
+- Suggested sub tasks:
+  - Introduce typed results or exception subclasses with `code` field
+  - Update preflight tests to assert codes
+  - Short integrator note in `README.md` or `engine/CONTRACTS.md`
+
+#### Task: Deeper corpus ingest smoke tests (optional)
+- Sprint: Foundation Setup
+- Epic name: Foundation — Optional hardening
+- Optional: yes
+- Description:
+  - Objective: Beyond baseline tracked-change checks, add optional tests that parse `sample-docs` sources through ingest and assert deterministic IR shape metrics (paragraph counts, empty run handling).
+  - Scope:
+    - Parallel with: Golden harness (Sprint 4) if overlap
+    - Depends on: DOCX body ingest
+  - Acceptance criteria:
+    - At least one pytest module or parametrized subset runs ingest on representative files from each of `email1docs`, `email2docs`, `email3docs`
+    - Document runtime cost; mark slow tests if needed
+  - Validation/tests:
+    - pytest optional marker or default-fast subset documented in README
+- Suggested sub tasks:
+  - Pick stable medium-sized fixtures per corpus folder
+  - Assert non-empty `blocks` and contract validation passes
+  - Add `pytest` marker `slow` or similar if full corpus is too heavy for every PR
+
 ---
 
 ## Sprint 2 — Body Comparison Core
@@ -139,12 +179,44 @@
   - Add tests: insert/delete/replace within one paragraph
   - Ensure diff ops are emitted in deterministic order for stable output
 
-### Optional follow-ups (Sprint 2 — after SCRUM-48 audit)
+### Epic: Body compare — Optional hardening
 
-These are **not** required to meet MDC-005–007 acceptance; open separate Jira items if prioritized.
+#### Task: Full-body compare orchestration (optional)
+- Sprint: Body Comparison Core
+- Epic name: Body compare — Optional hardening
+- Optional: yes
+- Description:
+  - Objective: One engine entry that runs paragraph alignment, then inline diff for each alignment row where both original and revised indices are present; helpers to slice a single paragraph from `BodyIR`.
+  - Scope:
+    - Parallel with: None
+    - Depends on: Paragraph alignment + inline diff
+  - Acceptance criteria:
+    - Public API (for example `matched_paragraph_inline_diffs` + `single_paragraph_body`) documented
+    - Inline paths use original paragraph index `blocks/{i}/inline/...`
+    - Unit tests cover multi-paragraph bodies and path indices
+  - Validation/tests:
+    - pytest in `tests/test_body_compare.py` (or equivalent)
+  - Implementation note:
+    - Repo baseline includes `engine/body_compare.py`; extend if CLI needs richer reporting.
 
-- **Full-body orchestration:** one engine entry point that runs `align_paragraphs`, then `inline_diff_single_paragraph` for each alignment row with both paragraph indices set (plus small `BodyIR` slice helpers).
-- **Alignment refinement:** if same visible text split across runs mis-aligns paragraphs, consider stronger paragraph matching (document tradeoffs first).
+#### Task: Paragraph alignment signature refinement (optional)
+- Sprint: Body Comparison Core
+- Epic name: Body compare — Optional hardening
+- Optional: yes
+- Description:
+  - Objective: When two paragraphs share the same concatenated text but different run boundaries, LCS on per-run signatures may fail to align them; evaluate aligning on concatenated paragraph text, run normalization, or document the limitation.
+  - Scope:
+    - Parallel with: Full-body orchestration
+    - Depends on: Compare keys + paragraph alignment
+  - Acceptance criteria:
+    - Decision doc (short) or catalog update with tradeoffs
+    - If implemented: unit tests for previously mis-aligned fixtures
+  - Validation/tests:
+    - Regression tests; no change to default behavior without feature flag if risky
+- Suggested sub tasks:
+  - Reproduce with minimal two-run vs one-run fixture
+  - Spike alternative signature: hash of concatenated normalized text only
+  - Team review before changing default alignment
 
 ---
 
@@ -207,6 +279,23 @@ These are **not** required to meet MDC-005–007 acceptance; open separate Jira 
   - Implement body revision emitter for insert/delete run groups
   - Add output packaging helper for writing updated DOCX parts
   - Add fixture tests that assert `w:ins` / `w:del` presence and shape
+
+### Epic: Structured content — Optional tooling
+
+#### Task: Minimal OOXML fixture pack for tables and headers (optional)
+- Sprint: Structured content + minimal Track Changes
+- Epic name: Structured content — Optional tooling
+- Optional: yes
+- Description:
+  - Objective: Curate tiny hand-built `.docx` fixtures (zip-in-repo) covering nested tables, merged cells, and header/footer variants to speed MDC-008/009 without relying on full corpus docs in unit tests.
+  - Scope:
+    - Parallel with: Tables and headers epics
+    - Depends on: None
+  - Acceptance criteria:
+    - `tests/fixtures/` or `sample-docs/fixtures/` documented inventory
+    - At least one fixture per structural concern the team prioritizes
+  - Validation/tests:
+    - pytest loads fixtures in CI under current ingest limits
 
 ---
 
@@ -271,6 +360,38 @@ These are **not** required to meet MDC-005–007 acceptance; open separate Jira 
   - Add/maintain dedicated CI job for golden regression harness
   - Ensure CI remains deterministic and reports artifact outputs where helpful
   - Document CI job purpose and smoke/full mode in workflow comments or docs
+
+### Epic: Verification — Optional expansion
+
+#### Task: Golden harness full-matrix / nightly (optional)
+- Sprint: Output metadata + verification
+- Epic name: Verification — Optional expansion
+- Optional: yes
+- Description:
+  - Objective: Run all configured `sample-docs` pairs (or a documented full matrix) on a nightly schedule or optional CI workflow, beyond PR smoke subset.
+  - Scope:
+    - Parallel with: MDC-012 golden harness implementation
+    - Depends on: Stable engine compare output path
+  - Acceptance criteria:
+    - Workflow or script documented with runtime expectations
+    - Failure artifacts (logs, diff summaries) retained for triage
+  - Validation/tests:
+    - Dry-run in CI or scheduled job; team agrees on pass/fail thresholds
+
+#### Task: Compare output vs Merck reference doc spot-check (optional)
+- Sprint: Output metadata + verification
+- Epic name: Verification — Optional expansion
+- Optional: yes
+- Description:
+  - Objective: Optional automated or semi-manual check that engine output for a fixture pair loosely matches Merck-provided compare docs (revision counts, key sections), without brittle binary equality.
+  - Scope:
+    - Parallel with: Track Changes emitter maturity
+    - Depends on: Output `.docx` generation
+  - Acceptance criteria:
+    - Document methodology and tolerance (e.g. revision count bands)
+    - One IB or Protocol pair pilot
+  - Validation/tests:
+    - pytest or script with golden thresholds; clearly marked experimental
 
 ---
 
@@ -352,6 +473,37 @@ These are **not** required to meet MDC-005–007 acceptance; open separate Jira 
   - Define error mapping table for known engine failures
   - Surface actionable UI messages and optional logs path
   - Add README troubleshooting section with common failure patterns
+
+### Epic: Desktop MVP — Optional polish
+
+#### Task: In-app preflight preview before compare (optional)
+- Sprint: Desktop MVP + hardening
+- Epic name: Desktop MVP — Optional polish
+- Optional: yes
+- Description:
+  - Objective: Run preflight on selected files and show pass/fail in UI before invoking full compare (clear messaging for tracked changes/comments).
+  - Scope:
+    - Parallel with: Error UX
+    - Depends on: Preflight validation exposed via CLI or Python API
+  - Acceptance criteria:
+    - User sees structured result for each file
+    - No compare run when preflight fails
+  - Validation/tests:
+    - UI or integration test with synthetic bad/good docx paths
+
+#### Task: Compare progress / cancellation (optional)
+- Sprint: Desktop MVP + hardening
+- Epic name: Desktop MVP — Optional polish
+- Optional: yes
+- Description:
+  - Objective: Long-running compares on large Protocol/IB docs need progress feedback and cancel without orphan processes.
+  - Scope:
+    - Parallel with: Engine CLI
+    - Depends on: Async or subprocess contract from desktop
+  - Acceptance criteria:
+    - Documented behavior for cancel and partial output cleanup
+  - Validation/tests:
+    - Manual or scripted long-run test on sample large doc
 
 ### Epic: Stretch — move detection
 

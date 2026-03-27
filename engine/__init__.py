@@ -18,6 +18,7 @@ from .compare_keys import (
     align_runs_by_compare_keys,
     generate_compare_keys,
 )
+from .body_compare import MatchedParagraphDiff, matched_paragraph_inline_diffs, single_paragraph_body
 from .inline_run_diff import inline_diff_single_paragraph
 from .paragraph_alignment import ParagraphAlignment, align_paragraphs
 from .preflight_validation import (
@@ -45,6 +46,9 @@ __all__ = [
     "ParagraphAlignment",
     "align_paragraphs",
     "inline_diff_single_paragraph",
+    "MatchedParagraphDiff",
+    "matched_paragraph_inline_diffs",
+    "single_paragraph_body",
     "validate_body_ir",
     "validate_compare_config",
     "validate_diff_ops",

@@ -43,6 +43,8 @@ Verification note: `docs/SCRUM-48-SPRINT2-AUDIT.md` (SCRUM-48) confirms catalog 
 | MDC-006 | `engine/paragraph_alignment.py` | `tests/test_paragraph_alignment.py` |
 | MDC-007 | `engine/inline_run_diff.py` | `tests/test_inline_run_diff.py` |
 
+Optional orchestration (post-SCRUM-48): `engine/body_compare.py` (`matched_paragraph_inline_diffs`), tests in `tests/test_body_compare.py`.
+
 ## Dependency sketch (simplified)
 
 ```text

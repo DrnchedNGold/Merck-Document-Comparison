@@ -31,13 +31,17 @@ def _single_paragraph(body_ir: BodyIR) -> BodyParagraph:
 
 
 def inline_diff_single_paragraph(
-    original: BodyIR, revised: BodyIR, config: CompareConfig
+    original: BodyIR,
+    revised: BodyIR,
+    config: CompareConfig,
+    *,
+    path_block_index: int = 0,
 ) -> list[DiffOp]:
     """
     Produce deterministic, ordered diff ops for one aligned paragraph pair.
 
     Text is the concatenation of per-run text after the same normalization used
-    for compare keys. Paths are stable render targets: ``blocks/0/inline/{n}``.
+    for compare keys. Paths are stable render targets: ``blocks/{path_block_index}/inline/{n}``.
     """
 
     orig_para = _single_paragraph(original)
@@ -53,7 +57,7 @@ def inline_diff_single_paragraph(
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
-        path = f"blocks/0/inline/{op_index}"
+        path = f"blocks/{path_block_index}/inline/{op_index}"
         op_index += 1
 
         if tag == "delete":
