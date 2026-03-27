@@ -2,9 +2,9 @@
 
 Teammates use this with Cursor Pro and BMad. **Do not commit or push** until the user asks to ship. Phrases like **“Push and open a PR”**, **“Create the pull request”**, or **“Ship this”** count as **full permission** to push the **feature branch** and open the PR — **not** to push directly to `main` (see **“Requests to push to `main`”** below).
 
-## One-time onboarding (same as `TEAM-WORKFLOW.md`)
+## Task kickoff context refresh (same as `TEAM-WORKFLOW.md`)
 
-Use the **standard onboarding prompt** in [`AI-PROMPTS-INDEX.md → One-time onboarding`](AI-PROMPTS-INDEX.md#prompt-onboarding) after clone. One run per person per machine is enough; after that, **pull `main`** and the repo files remain the authority—the AI should re-read relevant docs when starting a new task, without repeating the full onboarding essay unless the user asks.
+Use the **task kickoff context refresh prompt** in [`AI-PROMPTS-INDEX.md → Task kickoff context refresh`](AI-PROMPTS-INDEX.md#prompt-onboarding) at the start of each new task. The prompt should refresh context from both docs and current code/layout before implementation.
 
 ## Jira task format
 

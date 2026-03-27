@@ -12,6 +12,14 @@ Top-level layout used for the monorepo baseline:
 - `desktop/` - desktop application shell
 - `tests/` - repository-level tests
 
+## Project setup dependencies and tools
+
+- Python 3.12 or newer
+- Docker (recommended test execution path via `make test`)
+- GNU Make
+- Git
+- GitHub CLI (`gh`) for PR creation from terminal/agent workflows
+
 ## Install deps and run tests
 
 Recommended (fully automated, no host Python setup required):

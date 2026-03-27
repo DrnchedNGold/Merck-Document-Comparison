@@ -4,10 +4,10 @@ This file centralizes the copy/paste prompts used by the team in Cursor Pro + BM
 Keep the text here as the “source of truth” to avoid drift and redundancy in other docs.
 
 <a id="prompt-onboarding"></a>
-## 1) One-time onboarding prompt (after clone)
+## 1) Task kickoff context refresh prompt (run at the start of each new task)
 
 ```text
-This is my first session on this repository. Load full project context before we do any tasks.
+I am starting a new task. Refresh full project context before we do implementation work.
 
 Read in order (use the repo files, don’t guess):
 1. README.md
@@ -18,8 +18,11 @@ Read in order (use the repo files, don’t guess):
 6. docs/PROJECT-PLAN-V1.md (phases and milestones)
 7. docs/V1-ACCEPTANCE-CATALOG.md (skim structure; acceptance criteria reference catalog)
 8. sample-docs/ — note what client reference materials exist
+9. Actual project code/layout: inspect current top-level directories, test/CI setup, and any files relevant to the upcoming task.
 
-Then give a short summary: goal, v1 scope, guardrails, and where tasks live (Jira vs docs/V1-ACCEPTANCE-CATALOG.md). Do not write code yet.
+Then give a short summary: goal, v1 scope, guardrails, where tasks live (Jira vs docs/V1-ACCEPTANCE-CATALOG.md), and current codebase status relevant to the task. Do not write code yet.
+
+Throughout the task, use BMad workflows/skills whenever they add value.
 ```
 
 [Back to TEAM-WORKFLOW](TEAM-WORKFLOW.md)
@@ -32,8 +35,8 @@ Replace the block with what Jira shows (key + title + description + acceptance c
 ```text
 I’m implementing this Jira task only. Do not push to main.
 
-Jira: (paste task id) Ex. MDC-007
-Summary: (past task summary) Ex. MDC-007 Inline diff for runs
+Jira: (paste task id) Ex. SCRUM-007
+Summary: (past task summary) Ex. SCRUM-007 Inline diff for runs
 Description:
 (paste)
 
@@ -146,4 +149,3 @@ Stop. Scope check: only what this Jira issue describes. List anything you added 
 ```
 
 [Back to TEAM-PLAYBOOK](TEAM-PLAYBOOK.md)
-
