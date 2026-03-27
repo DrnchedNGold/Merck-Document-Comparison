@@ -37,6 +37,7 @@ Notes:
 - `insert` typically uses `before = null`
 - `delete` typically uses `after = null`
 - `replace` usually has both values present
+- Inline paragraph diffs (MDC-007) use paths like `blocks/0/inline/0`, `blocks/0/inline/1`, … in document order.
 
 ## 3) Compare Config (Word-like default stub)
 

@@ -18,6 +18,7 @@ from .compare_keys import (
     align_runs_by_compare_keys,
     generate_compare_keys,
 )
+from .inline_run_diff import inline_diff_single_paragraph
 from .paragraph_alignment import ParagraphAlignment, align_paragraphs
 from .preflight_validation import (
     CommentsDetectedError,
@@ -43,6 +44,7 @@ __all__ = [
     "align_runs_by_compare_keys",
     "ParagraphAlignment",
     "align_paragraphs",
+    "inline_diff_single_paragraph",
     "validate_body_ir",
     "validate_compare_config",
     "validate_diff_ops",
