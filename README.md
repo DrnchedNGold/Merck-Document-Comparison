@@ -54,6 +54,6 @@ python -m pytest
 - [`docs/PRE-PUSH-CHECKLIST.md`](docs/PRE-PUSH-CHECKLIST.md) — repo / GitHub hygiene  
 - [`docs/AI-PROMPTS-INDEX.md`](docs/AI-PROMPTS-INDEX.md) — all copy/paste AI prompts
 - [`docs/ADD-JIRA-TASKS-PROMPT.md`](docs/ADD-JIRA-TASKS-PROMPT.md) — generate Jira-ready task suggestions from the repo state
-- [`sample-docs/`](sample-docs/) — client PDF + example compare pairs  
+- [`sample-docs/`](sample-docs/) — email1/email2/email3 corpora, client process artifacts, and compare reference outputs  
 
 **BMad epics mirror (sprint tooling):** `_bmad-output/planning-artifacts/epics-v1.md`
