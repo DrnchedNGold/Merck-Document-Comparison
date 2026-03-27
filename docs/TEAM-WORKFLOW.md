@@ -22,6 +22,7 @@ You should not have to hunt for scope in chat if it is already on the ticket.
 
 - Stay within the Jira task. If the AI suggests changes that **clearly go beyond** that scope—especially edits to project context files listed in `docs/CONTEXT-CHANGE-POLICY.md`—it should **stop**, explain the gap, and **flag the reviewer** (see playbook: context escalation). You keep working only after scope is clarified or the reviewer approves.
 - Follow product guardrails in `docs/PRODUCT-DECISIONS.md` (Word-compatible defaults, Track Changes output, v1 `.docx` only, etc.).
+- Every task should include related automated tests for changed behavior and update CI (`.github/workflows/tests.yml`) if new tooling or test steps are needed.
 
 ## When you are done: one short message to the AI (not `main`)
 
