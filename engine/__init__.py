@@ -18,6 +18,7 @@ from .compare_keys import (
     align_runs_by_compare_keys,
     generate_compare_keys,
 )
+from .paragraph_alignment import ParagraphAlignment, align_paragraphs
 from .preflight_validation import (
     CommentsDetectedError,
     InvalidDocxFileTypeError,
@@ -40,6 +41,8 @@ __all__ = [
     "parse_docx_body_ir",
     "generate_compare_keys",
     "align_runs_by_compare_keys",
+    "ParagraphAlignment",
+    "align_paragraphs",
     "validate_body_ir",
     "validate_compare_config",
     "validate_diff_ops",
