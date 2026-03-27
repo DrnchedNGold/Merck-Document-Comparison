@@ -157,3 +157,22 @@ def test_preflight_propagates_document_xml_missing_error(tmp_path: Path) -> None
 
     assert "word/document.xml" in str(exc.value)
 
+
+def test_preflight_passes_clean_docx_without_tracked_changes_or_comments(
+    tmp_path: Path,
+) -> None:
+    """Happy path: valid .docx with body text only (MDC-004)."""
+
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Clean body for preflight.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>
+"""
+
+    docx_path = _make_docx_with_entries(tmp_path, entries={"word/document.xml": document_xml})
+    validate_docx_for_preflight(docx_path)
+
