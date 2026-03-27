@@ -12,11 +12,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Ensure no Python cache artifacts are committed
+      - name: Ensure no new Python cache artifacts are added
         run: |
-          if git ls-files | grep -E '(^|/)(__pycache__/|.*\.py[co]$)'; then
-            echo "Cache artifacts are tracked. Remove them from git."
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            RANGE="$BASE_SHA...HEAD"
+          else
+            BEFORE_SHA="${{ github.event.before }}"
+            RANGE="$BEFORE_SHA...HEAD"
+          fi
+
+          ADDED_CACHE_FILES="$(git diff --name-status "$RANGE" | awk '$1=="A"{print $2}' | grep -E '(^|/)(__pycache__/|.*\.py[co]$)' || true)"
+          if [ -n "$ADDED_CACHE_FILES" ]; then
+            echo "New cache artifacts were added:"
+            echo "$ADDED_CACHE_FILES"
             exit 1
           fi
 
