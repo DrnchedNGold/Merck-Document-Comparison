@@ -13,6 +13,11 @@ from .contracts import (
     validate_diff_ops,
 )
 from .docx_body_ingest import DocumentXmlMissingError, parse_docx_body_ir
+from .compare_keys import (
+    CompareKey,
+    align_runs_by_compare_keys,
+    generate_compare_keys,
+)
 from .preflight_validation import (
     CommentsDetectedError,
     InvalidDocxFileTypeError,
@@ -31,7 +36,10 @@ __all__ = [
     "CompareConfig",
     "DiffOp",
     "DocumentXmlMissingError",
+    "CompareKey",
     "parse_docx_body_ir",
+    "generate_compare_keys",
+    "align_runs_by_compare_keys",
     "validate_body_ir",
     "validate_compare_config",
     "validate_diff_ops",
