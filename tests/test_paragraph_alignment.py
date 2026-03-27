@@ -55,3 +55,25 @@ def test_alignment_handles_small_reorder() -> None:
         [(0, 0), (1, 2), (2, None), (None, 1)],
     )
 
+
+def test_alignment_empty_both_sides() -> None:
+    original = {"version": 1, "blocks": []}
+    revised = {"version": 1, "blocks": []}
+    assert align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG) == []
+
+
+def test_alignment_insert_all_paragraphs_when_original_empty() -> None:
+    original = {"version": 1, "blocks": []}
+    revised = {"version": 1, "blocks": [_p("A"), _p("B")]}
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+    assert pairs == [(None, 0), (None, 1)]
+
+
+def test_alignment_delete_all_paragraphs_when_revised_empty() -> None:
+    original = {"version": 1, "blocks": [_p("A"), _p("B")]}
+    revised = {"version": 1, "blocks": []}
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+    assert pairs == [(0, None), (1, None)]
+

@@ -19,6 +19,7 @@ See `docs/CAPTURE-WORD-COMPARE-SETTINGS.md` for what is already captured vs opti
 ## GitHub
 
 - [ ] `.github/CODEOWNERS` lists the correct GitHub user for reviews (`@DrnchedNGold`).
+- [ ] `.github/workflows/tests.yml` still matches current test strategy (matrix versions, Docker path, and required checks).
 - [ ] Branch protection on `main` (recommended): require PR, require review from code owners where applicable.
 - [ ] Teammates have access (write or fork + PR, per your policy).
 - [ ] No secrets in the repo.
