@@ -3,6 +3,23 @@ Paragraph alignment (MDC-006)
 
 Deterministically align paragraphs between two BodyIR payloads to localize diffs.
 This is a minimal foundation implementation to support later inline diffing.
+
+Algorithm (v1 foundation)
+    Signatures are built from normalized compare keys per paragraph (see
+    ``generate_compare_keys``). Alignment is the longest common subsequence (LCS)
+    of signature strings. Backtracking prefers deleting from the original when
+    LCS tie-breaks are equal (``dp[i+1][j] >= dp[i][j+1]``), which keeps
+    behavior stable and repeatable for the same inputs.
+
+Assumptions and limits
+    - One BodyIR "block" is treated as one alignable unit (paragraph-level).
+    - Matching is by full-paragraph signature equality; two different paragraphs
+      with the same normalized content+format key can align ambiguously (same
+      as any hash/LCS over equality).
+    - No cross-paragraph move detection; reordering is expressed as delete +
+      insert alignment pairs, not as a semantic "move" op.
+    - Tables, headers/footers, and non-body parts are out of scope until wired
+      into BodyIR the same way as body paragraphs.
 """
 
 from __future__ import annotations
