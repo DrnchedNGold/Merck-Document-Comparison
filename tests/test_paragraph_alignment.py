@@ -1,0 +1,57 @@
+from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
+from engine.paragraph_alignment import align_paragraphs
+
+
+def _p(text: str) -> dict:
+    return {"type": "paragraph", "id": "x", "runs": [{"text": text}]}
+
+
+def test_alignment_is_deterministic_across_runs() -> None:
+    original = {"version": 1, "blocks": [_p("A"), _p("B"), _p("C")]}
+    revised = {"version": 1, "blocks": [_p("A"), _p("B"), _p("C")]}
+
+    a1 = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    a2 = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+
+    assert a1 == a2
+    assert [(x.original_paragraph_index, x.revised_paragraph_index) for x in a1] == [
+        (0, 0),
+        (1, 1),
+        (2, 2),
+    ]
+
+
+def test_alignment_handles_insert() -> None:
+    original = {"version": 1, "blocks": [_p("A"), _p("B"), _p("C")]}
+    revised = {"version": 1, "blocks": [_p("A"), _p("B"), _p("X"), _p("C")]}
+
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+
+    assert pairs == [(0, 0), (1, 1), (None, 2), (2, 3)]
+
+
+def test_alignment_handles_delete() -> None:
+    original = {"version": 1, "blocks": [_p("A"), _p("B"), _p("C")]}
+    revised = {"version": 1, "blocks": [_p("A"), _p("C")]}
+
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+
+    assert pairs == [(0, 0), (1, None), (2, 1)]
+
+
+def test_alignment_handles_small_reorder() -> None:
+    original = {"version": 1, "blocks": [_p("A"), _p("B"), _p("C")]}
+    revised = {"version": 1, "blocks": [_p("A"), _p("C"), _p("B")]}
+
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+
+    # LCS should match A and then deterministically choose the next best match.
+    # This produces one delete and one insert around the reordered paragraph.
+    assert pairs in (
+        [(0, 0), (1, None), (2, 1), (None, 2)],
+        [(0, 0), (1, 2), (2, None), (None, 1)],
+    )
+
