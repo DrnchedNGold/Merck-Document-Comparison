@@ -8,3 +8,8 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Python cache artifacts
+__pycache__/
+*.py[cod]
+tests/__pycache__root_old/
