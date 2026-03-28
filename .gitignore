@@ -13,3 +13,6 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 tests/__pycache__root_old/
+
+# Local editor rules (optional)
+.cursor/
