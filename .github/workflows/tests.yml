@@ -1,3 +1,14 @@
+# CI (SCRUM-72 / MDC-013)
+#
+# Jobs:
+# - guardrails: block accidental __pycache__ / .pyc additions on changed files.
+# - pytest-matrix: default suite on Python 3.12 + 3.13 with coverage (excludes
+#   tests marked golden_corpus so PR signal stays fast).
+# - docker-make-test: full `pytest` inside Docker (`make test`).
+#
+# Golden / sample-docs regression runs in a separate workflow:
+#   `.github/workflows/golden-regression.yml`
+
 name: CI
 
 on:
@@ -56,11 +67,9 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip install pytest-cov
 
-      # Full suite includes golden corpus harness logic (synthetic tests always run).
-      # Tests marked golden_corpus skip when sponsor .docx files are not in the checkout.
-      - name: Run pytest with coverage
+      - name: Run pytest with coverage (excluding golden_corpus)
         run: |
-          python -m pytest --cov=engine --cov-report=xml --cov-report=term-missing
+          python -m pytest -m "not golden_corpus" --cov=engine --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
