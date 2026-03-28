@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -13,8 +14,13 @@ from engine.corpus_harness import (
     GoldenPair,
     HarnessBatchResult,
     PairRunResult,
+    format_batch_report_json,
     format_batch_text_report,
+    format_batch_text_report_verbose,
+    harness_batch_to_json_dict,
+    iter_snapshot_mismatches,
     load_golden_pairs,
+    normalize_report_snapshot,
     revision_counts_by_part,
     run_configured_pairs,
     run_pair_emit_and_report,
@@ -23,6 +29,7 @@ from engine.corpus_harness import (
 from engine.body_revision_emit import emit_docx_with_package_track_changes
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_NS = {"w": WORD_NS}
 
 
 def _repo_root() -> Path:
@@ -79,11 +86,120 @@ def test_package_emit_produces_revision_counts_on_minimal_docx(tmp_path: Path) -
     orig = _one_docx("o.docx", "aa")
     rev = _one_docx("r.docx", "ab")
     out = tmp_path / "out.docx"
+    fixed_date = "2026-03-27T00:00:00Z"
     emit_docx_with_package_track_changes(
-        orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG, date_iso="2026-03-27T00:00:00Z"
+        orig,
+        rev,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        author="HarnessMetaTest",
+        date_iso=fixed_date,
     )
     report = revision_counts_by_part(out)
     assert report["summary"]["document"]["ins"] + report["summary"]["document"]["del"] >= 1
+    with zipfile.ZipFile(out, "r") as zf:
+        doc_root = ET.fromstring(zf.read("word/document.xml"))
+    for tag in ("ins", "del"):
+        for el in doc_root.findall(f".//w:{tag}", _NS):
+            assert el.get(f"{{{WORD_NS}}}date") == fixed_date
+            assert el.get(f"{{{WORD_NS}}}author") == "HarnessMetaTest"
+
+
+def test_normalize_report_snapshot_sorts_by_part() -> None:
+    report = {
+        "summary": {
+            "document": {"ins": 1, "del": 2},
+            "headers": {"ins": 0, "del": 0},
+            "footers": {"ins": 3, "del": 0},
+        },
+        "by_part": {
+            "word/z.xml": {"ins": 0, "del": 0},
+            "word/document.xml": {"ins": 1, "del": 2},
+        },
+    }
+    snap = normalize_report_snapshot(report)
+    keys = list(snap["by_part"].keys())
+    assert keys == sorted(keys)
+
+
+def test_iter_snapshot_mismatches_empty_when_equal() -> None:
+    r = {
+        "summary": {
+            "document": {"ins": 1, "del": 0},
+            "headers": {"ins": 0, "del": 0},
+            "footers": {"ins": 0, "del": 0},
+        },
+        "by_part": {"word/document.xml": {"ins": 1, "del": 0}},
+    }
+    assert list(iter_snapshot_mismatches(r, r)) == []
+
+
+def test_iter_snapshot_mismatches_on_summary_delta() -> None:
+    a = {
+        "summary": {
+            "document": {"ins": 1, "del": 0},
+            "headers": {"ins": 0, "del": 0},
+            "footers": {"ins": 0, "del": 0},
+        },
+        "by_part": {"word/document.xml": {"ins": 1, "del": 0}},
+    }
+    b = {
+        "summary": {
+            "document": {"ins": 2, "del": 0},
+            "headers": {"ins": 0, "del": 0},
+            "footers": {"ins": 0, "del": 0},
+        },
+        "by_part": {"word/document.xml": {"ins": 1, "del": 0}},
+    }
+    msgs = list(iter_snapshot_mismatches(a, b))
+    assert msgs and "summary" in msgs[0]
+
+
+def test_format_batch_text_report_verbose_includes_by_part_lines() -> None:
+    r_ok = PairRunResult(
+        "p1",
+        True,
+        None,
+        None,
+        {
+            "summary": {
+                "document": {"ins": 1, "del": 0},
+                "headers": {"ins": 0, "del": 1},
+                "footers": {"ins": 0, "del": 0},
+            },
+            "by_part": {
+                "word/document.xml": {"ins": 1, "del": 0},
+                "word/header1.xml": {"ins": 0, "del": 1},
+            },
+        },
+    )
+    text = format_batch_text_report_verbose(HarnessBatchResult([r_ok]))
+    assert "by_part" in text
+    assert "word/document.xml" in text and "word/header1.xml" in text
+    assert "doc_ins=1" in text
+
+
+def test_format_batch_report_json_roundtrip() -> None:
+    r_ok = PairRunResult(
+        "p1",
+        True,
+        None,
+        None,
+        {
+            "summary": {
+                "document": {"ins": 1, "del": 0},
+                "headers": {"ins": 0, "del": 0},
+                "footers": {"ins": 0, "del": 0},
+            },
+            "by_part": {"word/document.xml": {"ins": 1, "del": 0}},
+        },
+    )
+    d = harness_batch_to_json_dict(HarnessBatchResult([r_ok]))
+    assert d["results"][0]["pair_id"] == "p1"
+    assert d["results"][0]["ok"] is True
+    assert d["results"][0]["report"]["by_part"]["word/document.xml"]["ins"] == 1
+    json_text = format_batch_report_json(HarnessBatchResult([r_ok]))
+    assert '"pair_id"' in json_text and "p1" in json_text
 
 
 def test_format_batch_text_report() -> None:

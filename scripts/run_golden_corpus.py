@@ -15,7 +15,9 @@ def main() -> int:
 
     from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
     from engine.corpus_harness import (
+        format_batch_report_json,
         format_batch_text_report,
+        format_batch_text_report_verbose,
         load_golden_pairs,
         run_configured_pairs,
     )
@@ -41,6 +43,25 @@ def main() -> int:
         default="GoldenCorpusHarness",
         help="w:author for emitted revisions",
     )
+    parser.add_argument(
+        "--date-iso",
+        default=None,
+        metavar="UTC_DATETIME",
+        help=(
+            "Fixed w:date for all revisions (ISO 8601 UTC, e.g. 2026-03-27T12:00:00Z). "
+            "Omit for wall-clock UTC time (non-reproducible across runs)."
+        ),
+    )
+    parser.add_argument(
+        "--verbose-parts",
+        action="store_true",
+        help="After the summary TSV, print per-pair summary and sorted by_part lines.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON (pair_id, ok, error, normalized report). Implies not TSV-only.",
+    )
     args = parser.parse_args()
 
     pairs = load_golden_pairs(args.config)
@@ -54,8 +75,14 @@ def main() -> int:
         args.output_dir,
         DEFAULT_WORD_LIKE_COMPARE_CONFIG,
         author=args.author,
+        date_iso=args.date_iso,
     )
-    print(format_batch_text_report(batch))
+    if args.json:
+        print(format_batch_report_json(batch), end="")
+    elif args.verbose_parts:
+        print(format_batch_text_report_verbose(batch), end="")
+    else:
+        print(format_batch_text_report(batch))
     return 0 if batch.all_ok() else 1
 
 

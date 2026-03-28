@@ -2,8 +2,14 @@
 # Runs in parallel with `.github/workflows/tests.yml` (CI). Repo settings can
 # require both checks on `main` if desired.
 #
-# Scope: `pytest -m golden_corpus` only — see tests/test_sample_docs_corpus_baseline.py
-# and tests/test_golden_corpus_harness.py.
+# Scope: `pytest -m golden_corpus` only — see tests/test_sample_docs_corpus_baseline.py,
+# tests/test_golden_corpus_harness.py, and tests/test_golden_corpus_snapshot.py.
+#
+# Mode: "full" when committed sample-docs are present (baseline + real-pair smoke +
+# golden_corpus_expected.json snapshot count regression);
+# otherwise corpus paths skip and synthetic harness tests still run (job stays green).
+# Main CI (`tests.yml`) excludes this marker for speed; `docker-make-test` runs the
+# full suite including these tests.
 
 name: Golden regression
 
