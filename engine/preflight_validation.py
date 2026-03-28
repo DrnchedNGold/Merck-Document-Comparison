@@ -2,8 +2,9 @@
 
 Rules implemented here:
 - Reject non-`.docx` inputs.
-- Detect pre-existing tracked changes (w:ins / w:del) in `word/document.xml`.
-- Detect pre-existing comments (comment markers in `word/document.xml` and/or
+- Detect pre-existing tracked changes (w:ins / w:del) in `word/document.xml` and
+  in `word/header*.xml` / `word/footer*.xml` parts.
+- Detect pre-existing comments (comment markers in those XML parts and/or
   `word/comments.xml` presence).
 
 This module intentionally does not implement DOCX parsing beyond loading the
@@ -18,6 +19,7 @@ from typing import Union
 import xml.etree.ElementTree as ET
 
 from .docx_body_ingest import DocumentXmlMissingError, WORD_NAMESPACE, load_word_document_xml_root
+from .docx_package_parts import discover_header_footer_part_paths
 
 NS = {"w": WORD_NAMESPACE}
 
@@ -45,9 +47,12 @@ class InvalidDocxZipFileError(PreflightValidationError):
 class TrackedChangesDetectedError(PreflightValidationError):
     """Raised when pre-existing tracked changes are found."""
 
-    def __init__(self, docx_path: Path, ins_count: int, del_count: int):
+    def __init__(
+        self, docx_path: Path, ins_count: int, del_count: int, *, part: str | None = None
+    ):
+        where = f" in part {part!r}" if part else ""
         super().__init__(
-            f"Tracked changes detected in '{docx_path}': w:ins={ins_count}, w:del={del_count}."
+            f"Tracked changes detected in '{docx_path}'{where}: w:ins={ins_count}, w:del={del_count}."
         )
 
 
@@ -61,11 +66,14 @@ class CommentsDetectedError(PreflightValidationError):
         comment_range_end_count: int,
         comment_reference_count: int,
         comments_xml_present: bool,
+        *,
+        part: str | None = None,
     ):
         comments_xml_str = "present" if comments_xml_present else "missing"
+        where = f" in part {part!r}" if part else ""
         super().__init__(
             "Comments detected in "
-            f"'{docx_path}': "
+            f"'{docx_path}'{where}: "
             f"w:commentRangeStart={comment_range_start_count}, "
             f"w:commentRangeEnd={comment_range_end_count}, "
             f"w:commentReference={comment_reference_count}, "
@@ -98,31 +106,49 @@ def validate_docx_for_preflight(docx_path: Union[str, Path]) -> None:
 
     # Reuse the existing body ingest XML loading behavior so we get a consistent
     # `word/document.xml missing` error and parsing mechanics.
-    root = load_word_document_xml_root(path)
+    doc_root = load_word_document_xml_root(path)
+    parts_to_scan: list[tuple[str, ET.Element]] = [("word/document.xml", doc_root)]
 
-    ins_count = _count_xml_elements(root, ".//w:ins")
-    del_count = _count_xml_elements(root, ".//w:del")
-    if ins_count > 0 or del_count > 0:
-        raise TrackedChangesDetectedError(path, ins_count=ins_count, del_count=del_count)
+    hf_paths = discover_header_footer_part_paths(path)
+    with zipfile.ZipFile(path, "r") as zf:
+        for hf in hf_paths:
+            parts_to_scan.append((hf, ET.fromstring(zf.read(hf))))
 
-    # Comments can be represented either by markers in document.xml and/or a
-    # standalone comments part (`word/comments.xml`).
-    comment_range_start_count = _count_xml_elements(root, ".//w:commentRangeStart")
-    comment_range_end_count = _count_xml_elements(root, ".//w:commentRangeEnd")
-    comment_reference_count = _count_xml_elements(root, ".//w:commentReference")
+    for part_name, xml_root in parts_to_scan:
+        ins_count = _count_xml_elements(xml_root, ".//w:ins")
+        del_count = _count_xml_elements(xml_root, ".//w:del")
+        if ins_count > 0 or del_count > 0:
+            raise TrackedChangesDetectedError(
+                path, ins_count=ins_count, del_count=del_count, part=part_name
+            )
 
     comments_xml_present = _docx_contains_zip_entry(path, "word/comments.xml")
-    if (
-        comment_range_start_count > 0
-        or comment_range_end_count > 0
-        or comment_reference_count > 0
-        or comments_xml_present
-    ):
+
+    for part_name, xml_root in parts_to_scan:
+        comment_range_start_count = _count_xml_elements(xml_root, ".//w:commentRangeStart")
+        comment_range_end_count = _count_xml_elements(xml_root, ".//w:commentRangeEnd")
+        comment_reference_count = _count_xml_elements(xml_root, ".//w:commentReference")
+        if (
+            comment_range_start_count > 0
+            or comment_range_end_count > 0
+            or comment_reference_count > 0
+        ):
+            raise CommentsDetectedError(
+                path,
+                comment_range_start_count=comment_range_start_count,
+                comment_range_end_count=comment_range_end_count,
+                comment_reference_count=comment_reference_count,
+                comments_xml_present=comments_xml_present,
+                part=part_name,
+            )
+
+    if comments_xml_present:
         raise CommentsDetectedError(
             path,
-            comment_range_start_count=comment_range_start_count,
-            comment_range_end_count=comment_range_end_count,
-            comment_reference_count=comment_reference_count,
-            comments_xml_present=comments_xml_present,
+            comment_range_start_count=0,
+            comment_range_end_count=0,
+            comment_reference_count=0,
+            comments_xml_present=True,
+            part="word/comments.xml",
         )
 

@@ -63,7 +63,9 @@ def test_preflight_rejects_tracked_changes_w_ins(tmp_path: Path) -> None:
     with pytest.raises(TrackedChangesDetectedError) as exc:
         validate_docx_for_preflight(docx_path)
 
-    assert str(exc.value) == f"Tracked changes detected in '{docx_path}': w:ins=1, w:del=0."
+    assert str(exc.value) == (
+        f"Tracked changes detected in '{docx_path}' in part 'word/document.xml': w:ins=1, w:del=0."
+    )
 
 
 def test_preflight_rejects_tracked_changes_w_del(tmp_path: Path) -> None:
@@ -83,7 +85,9 @@ def test_preflight_rejects_tracked_changes_w_del(tmp_path: Path) -> None:
     with pytest.raises(TrackedChangesDetectedError) as exc:
         validate_docx_for_preflight(docx_path)
 
-    assert str(exc.value) == f"Tracked changes detected in '{docx_path}': w:ins=0, w:del=1."
+    assert str(exc.value) == (
+        f"Tracked changes detected in '{docx_path}' in part 'word/document.xml': w:ins=0, w:del=1."
+    )
 
 
 def test_preflight_rejects_comments_by_markers_in_document_xml(tmp_path: Path) -> None:
@@ -105,13 +109,10 @@ def test_preflight_rejects_comments_by_markers_in_document_xml(tmp_path: Path) -
     with pytest.raises(CommentsDetectedError) as exc:
         validate_docx_for_preflight(docx_path)
 
-    assert (
-        str(exc.value)
-        == (
-            f"Comments detected in '{docx_path}': "
-            f"w:commentRangeStart=1, w:commentRangeEnd=1, w:commentReference=1, "
-            f"word/comments.xml=missing."
-        )
+    assert str(exc.value) == (
+        f"Comments detected in '{docx_path}' in part 'word/document.xml': "
+        f"w:commentRangeStart=1, w:commentRangeEnd=1, w:commentReference=1, "
+        f"word/comments.xml=missing."
     )
 
 
@@ -137,13 +138,10 @@ def test_preflight_rejects_comments_by_comments_xml_entry(tmp_path: Path) -> Non
     with pytest.raises(CommentsDetectedError) as exc:
         validate_docx_for_preflight(docx_path)
 
-    assert (
-        str(exc.value)
-        == (
-            f"Comments detected in '{docx_path}': "
-            f"w:commentRangeStart=0, w:commentRangeEnd=0, w:commentReference=0, "
-            f"word/comments.xml=present."
-        )
+    assert str(exc.value) == (
+        f"Comments detected in '{docx_path}' in part 'word/comments.xml': "
+        f"w:commentRangeStart=0, w:commentRangeEnd=0, w:commentReference=0, "
+        f"word/comments.xml=present."
     )
 
 
@@ -156,6 +154,24 @@ def test_preflight_propagates_document_xml_missing_error(tmp_path: Path) -> None
         validate_docx_for_preflight(docx_path)
 
     assert "word/document.xml" in str(exc.value)
+
+
+def test_preflight_rejects_tracked_changes_in_header_part(tmp_path: Path) -> None:
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}"><w:body><w:p><w:r><w:t>ok</w:t></w:r></w:p></w:body></w:document>
+"""
+    header_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="{WORD_NS}">
+  <w:p><w:r><w:t>x</w:t></w:r><w:ins w:id="1"><w:r><w:t>y</w:t></w:r></w:ins></w:p>
+</w:hdr>
+"""
+    docx_path = _make_docx_with_entries(
+        tmp_path,
+        entries={"word/document.xml": document_xml, "word/header1.xml": header_xml},
+    )
+    with pytest.raises(TrackedChangesDetectedError) as exc:
+        validate_docx_for_preflight(docx_path)
+    assert "word/header1.xml" in str(exc.value)
 
 
 def test_preflight_passes_clean_docx_without_tracked_changes_or_comments(

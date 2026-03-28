@@ -30,6 +30,12 @@ def _single_paragraph(body_ir: BodyIR) -> BodyParagraph:
     return block
 
 
+def _with_part(op: DiffOp, diff_part: str | None) -> DiffOp:
+    if diff_part is None:
+        return op
+    return {**op, "part": diff_part}
+
+
 def inline_diff_single_paragraph(
     original: BodyIR,
     revised: BodyIR,
@@ -37,6 +43,7 @@ def inline_diff_single_paragraph(
     *,
     path_block_index: int = 0,
     path_prefix: str | None = None,
+    diff_part: str | None = None,
 ) -> list[DiffOp]:
     """
     Produce deterministic, ordered diff ops for one aligned paragraph pair.
@@ -67,18 +74,31 @@ def inline_diff_single_paragraph(
 
         if tag == "delete":
             segment = orig_text[i1:i2]
-            ops.append({"op": "delete", "path": path, "before": segment, "after": None})
+            ops.append(
+                _with_part(
+                    {"op": "delete", "path": path, "before": segment, "after": None},
+                    diff_part,
+                )
+            )
         elif tag == "insert":
             segment = rev_text[j1:j2]
-            ops.append({"op": "insert", "path": path, "before": None, "after": segment})
+            ops.append(
+                _with_part(
+                    {"op": "insert", "path": path, "before": None, "after": segment},
+                    diff_part,
+                )
+            )
         elif tag == "replace":
             ops.append(
-                {
-                    "op": "replace",
-                    "path": path,
-                    "before": orig_text[i1:i2],
-                    "after": rev_text[j1:j2],
-                }
+                _with_part(
+                    {
+                        "op": "replace",
+                        "path": path,
+                        "before": orig_text[i1:i2],
+                        "after": rev_text[j1:j2],
+                    },
+                    diff_part,
+                )
             )
 
     return ops
