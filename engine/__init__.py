@@ -32,8 +32,10 @@ from .body_compare import (
 )
 from .body_revision_emit import (
     apply_body_track_changes_to_document_root,
+    apply_track_changes_to_hdr_ftr_root,
     build_paragraph_track_change_elements,
     emit_docx_with_body_track_changes,
+    emit_docx_with_package_track_changes,
 )
 from .document_package import DocumentPackageIR, parse_docx_document_package
 from .docx_output_package import write_docx_copy_with_part_replacements
@@ -69,8 +71,10 @@ __all__ = [
     "DOCUMENT_PART_PATH",
     "discover_header_footer_part_paths",
     "apply_body_track_changes_to_document_root",
+    "apply_track_changes_to_hdr_ftr_root",
     "build_paragraph_track_change_elements",
     "emit_docx_with_body_track_changes",
+    "emit_docx_with_package_track_changes",
     "matched_document_package_inline_diffs",
     "generate_compare_keys",
     "align_runs_by_compare_keys",
