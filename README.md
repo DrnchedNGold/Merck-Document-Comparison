@@ -54,6 +54,16 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
+### CI (GitHub Actions)
+
+On every push and pull request, `.github/workflows/tests.yml` runs:
+
+- **pytest-matrix** — suite **excluding** `@pytest.mark.golden_corpus` on Python 3.12 and 3.13, with coverage artifacts.
+- **golden-regression** — only `golden_corpus`-marked tests (committed `sample-docs` baselines + optional harness smoke).
+- **docker-make-test** — full `pytest` inside Docker (`make test`), same as a full local run.
+
+Run the golden subset locally: `python -m pytest -m golden_corpus`.
+
 ---
 
 ## Start here

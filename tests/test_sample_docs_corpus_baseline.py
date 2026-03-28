@@ -7,6 +7,8 @@ import pytest
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": WORD_NS}
 
+pytestmark = pytest.mark.golden_corpus
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
