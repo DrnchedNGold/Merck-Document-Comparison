@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import tkinter as tk
 from collections.abc import Callable
-from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-FileDialogFn = Callable[..., str | tuple[str, ...]]
+from desktop.desktop_state import FileDialogFn, compute_validation_state, pick_path_via_dialog
 
 
 class MerckDesktopApp(tk.Tk):
@@ -105,41 +104,22 @@ class MerckDesktopApp(tk.Tk):
         self._pick_file(self._revised_path, "Select Revised document")
 
     def _pick_file(self, dest: tk.StringVar, title: str) -> None:
-        path = self._file_dialog(
+        path = pick_path_via_dialog(
+            self._file_dialog,
             title=title,
             filetypes=[
                 ("Word documents", "*.docx"),
                 ("All files", "*.*"),
             ],
         )
-        if not path:
-            return
-        if isinstance(path, tuple):
-            path = path[0] if path else ""
-        dest.set(path)
+        if path:
+            dest.set(path)
 
     def _sync_validation(self) -> None:
-        o = self._original_path.get().strip()
-        r = self._revised_path.get().strip()
-        reasons: list[str] = []
-        if not o:
-            reasons.append("Original is not selected.")
-        elif not Path(o).is_file():
-            reasons.append("Original path is not a valid file.")
-        if not r:
-            reasons.append("Revised is not selected.")
-        elif not Path(r).is_file():
-            reasons.append("Revised path is not a valid file.")
-
-        if not reasons:
-            self._validation_message.set("Ready to compare.")
-            self._compare_btn.configure(state=tk.NORMAL)
-            self._status_label.configure(foreground="")
-            return
-
-        self._validation_message.set(" ".join(reasons))
-        self._compare_btn.configure(state=tk.DISABLED)
-        self._status_label.configure(foreground="#a50a0a")
+        state = compute_validation_state(self._original_path.get(), self._revised_path.get())
+        self._validation_message.set(state.message)
+        self._compare_btn.configure(state=tk.NORMAL if state.compare_enabled else tk.DISABLED)
+        self._status_label.configure(foreground="#a50a0a" if state.status_is_error else "")
 
     def _on_compare(self) -> None:
         # Stub until engine/CLI integration (separate task).

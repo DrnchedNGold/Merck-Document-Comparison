@@ -1,68 +1,91 @@
-"""Smoke tests for the desktop shell (requires tkinter).
+"""Tests for desktop shell behavior.
 
-Only one :class:`tkinter.Tk` root is created per module: creating multiple roots in
-one process is unreliable after the first window is destroyed.
+Validation and file-dialog wiring are exercised without Tk via :mod:`desktop.desktop_state`.
+A single optional test instantiates a real window when a display is available (local dev).
 """
 
 from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("tkinter")
-
-from desktop.main_window import MerckDesktopApp
-
-
-@pytest.fixture(scope="module")
-def desktop_app() -> MerckDesktopApp:
-    app = MerckDesktopApp()
-    app.withdraw()
-    yield app
-    app.destroy()
+from desktop.desktop_state import (
+    ValidationState,
+    compute_validation_state,
+    normalize_dialog_path,
+    pick_path_via_dialog,
+    tk_display_environment_ready,
+)
 
 
-def test_desktop_window_instantiates(desktop_app: MerckDesktopApp) -> None:
-    desktop_app.update_idletasks()
-    assert desktop_app.winfo_exists()
+def test_validation_empty_paths() -> None:
+    state = compute_validation_state("", "")
+    assert isinstance(state, ValidationState)
+    assert not state.compare_enabled
+    assert state.status_is_error
+    assert "original" in state.message.lower() and "revised" in state.message.lower()
 
 
-def test_compare_starts_disabled_without_files(desktop_app: MerckDesktopApp) -> None:
-    desktop_app.original_path_var.set("")
-    desktop_app.revised_path_var.set("")
-    desktop_app.set_file_dialog(None)
-    desktop_app.update_idletasks()
-    assert not desktop_app.compare_button_is_enabled()
-    msg = desktop_app.validation_message_text.lower()
-    assert "original" in msg and "revised" in msg
-
-
-def test_compare_enables_when_both_paths_are_existing_files(
-    desktop_app: MerckDesktopApp,
-    tmp_path,
-) -> None:
+def test_validation_ready_when_both_files_exist(tmp_path) -> None:
     orig = tmp_path / "a.docx"
     rev = tmp_path / "b.docx"
     orig.write_bytes(b"PK\x00")
     rev.write_bytes(b"PK\x00")
-
-    desktop_app.original_path_var.set(str(orig))
-    desktop_app.revised_path_var.set(str(rev))
-    desktop_app.update_idletasks()
-    assert desktop_app.compare_button_is_enabled()
-    assert "ready" in desktop_app.validation_message_text.lower()
+    state = compute_validation_state(str(orig), str(rev))
+    assert state.compare_enabled
+    assert not state.status_is_error
+    assert "ready" in state.message.lower()
 
 
-def test_browse_uses_injected_file_dialog(desktop_app: MerckDesktopApp) -> None:
-    calls: list[str] = []
+def test_validation_missing_file_on_disk(tmp_path) -> None:
+    orig = tmp_path / "gone.docx"
+    rev = tmp_path / "b.docx"
+    rev.write_bytes(b"PK\x00")
+    state = compute_validation_state(str(orig), str(rev))
+    assert not state.compare_enabled
+    assert "original" in state.message.lower()
 
-    def fake_dialog(**_kwargs) -> str:
-        calls.append("open")
+
+def test_normalize_dialog_path() -> None:
+    assert normalize_dialog_path("") == ""
+    assert normalize_dialog_path(None) == ""
+    assert normalize_dialog_path("/a/b.docx") == "/a/b.docx"
+    assert normalize_dialog_path(("/x",)) == "/x"
+    assert normalize_dialog_path(()) == ""
+
+
+def test_pick_path_via_dialog_invokes_backend() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_dialog(**kwargs) -> str:
+        calls.append((kwargs.get("title", ""), "ok"))
+        return "/tmp/chosen.docx"
+
+    path = pick_path_via_dialog(
+        fake_dialog,
+        title="Select Original document",
+        filetypes=[("Word documents", "*.docx")],
+    )
+    assert path == "/tmp/chosen.docx"
+    assert calls and "Select Original" in calls[0][0]
+
+
+def test_pick_path_via_dialog_cancel_returns_empty() -> None:
+    def cancel(**_kwargs) -> str:
         return ""
 
-    desktop_app.set_file_dialog(fake_dialog)
-    desktop_app.original_path_var.set("")
-    desktop_app.revised_path_var.set("")
-    desktop_app.browse_original()
-    desktop_app.update_idletasks()
-    assert calls == ["open"]
-    desktop_app.set_file_dialog(None)
+    assert pick_path_via_dialog(cancel, title="t", filetypes=[]) == ""
+
+
+@pytest.mark.skipif(
+    not tk_display_environment_ready(),
+    reason="No display (headless); Tk root not available",
+)
+def test_desktop_window_instantiates() -> None:
+    pytest.importorskip("tkinter")
+    from desktop.main_window import MerckDesktopApp
+
+    app = MerckDesktopApp()
+    app.withdraw()
+    app.update_idletasks()
+    assert app.winfo_exists()
+    app.destroy()

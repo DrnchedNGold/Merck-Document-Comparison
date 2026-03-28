@@ -16,6 +16,12 @@ def main() -> int:
     root_dir = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root_dir))
 
+    from desktop.desktop_state import tk_display_environment_ready
+
+    if not tk_display_environment_ready():
+        print("SKIP: no display (headless); cannot create Tk root", file=sys.stderr)
+        return 0
+
     try:
         import tkinter  # noqa: F401 — ensure GUI toolkit is present before loading the shell
     except ImportError:
