@@ -117,3 +117,46 @@ def test_package_compare_sets_part_on_rows_for_document_and_header(tmp_path: Pat
     assert all(r.part == DOCUMENT_PART_PATH for r in doc_rows)
     assert all(r.part == "word/header1.xml" for r in hdr_rows)
     assert all(len(r.diff_ops) == 0 for r in rows)
+
+
+def test_package_compare_sets_part_on_rows_for_document_and_footer(tmp_path: Path) -> None:
+    doc_same = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}"><w:body><w:p><w:r><w:t>Body</w:t></w:r></w:p></w:body></w:document>
+"""
+    ftr_same = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="{WORD_NS}"><w:p><w:r><w:t>Ftr</w:t></w:r></w:p></w:ftr>
+"""
+    left = _docx(tmp_path, document_xml=doc_same, extra_entries={"word/footer1.xml": ftr_same})
+    right = _docx(
+        tmp_path,
+        document_xml=doc_same,
+        extra_entries={"word/footer1.xml": ftr_same},
+        filename="right_ftr.docx",
+    )
+    rows = matched_document_package_inline_diffs(
+        parse_docx_document_package(left),
+        parse_docx_document_package(right),
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+
+    doc_rows = [r for r in rows if r.part == DOCUMENT_PART_PATH]
+    ftr_rows = [r for r in rows if r.part == "word/footer1.xml"]
+
+    assert len(doc_rows) >= 1
+    assert len(ftr_rows) >= 1
+    assert all(r.part == DOCUMENT_PART_PATH for r in doc_rows)
+    assert all(r.part == "word/footer1.xml" for r in ftr_rows)
+    assert all(len(r.diff_ops) == 0 for r in rows)
+
+
+def test_parse_document_package_loads_footer_body_ir(tmp_path: Path) -> None:
+    doc = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}"><w:body><w:p><w:r><w:t>Body</w:t></w:r></w:p></w:body></w:document>
+"""
+    ftr = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="{WORD_NS}"><w:p><w:r><w:t>Foot</w:t></w:r></w:p></w:ftr>
+"""
+    p = _docx(tmp_path, document_xml=doc, extra_entries={"word/footer1.xml": ftr})
+    pkg = parse_docx_document_package(p)
+    assert "word/footer1.xml" in pkg["header_footer"]
+    assert pkg["header_footer"]["word/footer1.xml"]["blocks"][0]["runs"][0]["text"] == "Foot"
