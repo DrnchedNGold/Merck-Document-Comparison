@@ -35,14 +35,22 @@ This runs tests in Docker with Python 3.12+.
 The repo includes a **config-driven harness** that runs the engine emit path on sponsor pairs under `sample-docs/` and prints **`w:ins` / `w:del` counts** per OOXML part, summarized as **document vs headers vs footers**.
 
 - **Pair list:** `tests/fixtures/golden_corpus_pairs.json` (paths relative to `sample-docs/`). It includes at least one pair from **`email1docs`**, **`email2docs`**, and **`email3docs`** (see `sample-docs/CORPUS-INVENTORY.md`).
+- **Snapshot baseline (ins/del counts):** `tests/fixtures/golden_corpus_expected.json` stores per-pair `summary` and `by_part` counts from `revision_counts_by_part` after emit. **`tests/test_golden_corpus_snapshot.py`** fails if the engine output drifts. **Refresh the baseline** after an intentional emit/report change:
+
+```bash
+python scripts/refresh_golden_corpus_baseline.py
+```
+
 - **Staged rollout:** Start with a single stable pair (edit the JSON to one entry, or pass a smaller JSON via `--config`), confirm reports locally, then restore the full list for complete corpus coverage.
-- **CLI** (from repo root, with sponsor `.docx` files present):
+- **CLI** (from repo root, with sponsor `.docx` files present). Default: one TSV line per pair. **`--verbose-parts`** adds per-pair `summary` and sorted `by_part` lines; **`--json`** prints structured JSON (same shape as `engine.corpus_harness.harness_batch_to_json_dict`).
 
 ```bash
 python scripts/run_golden_corpus.py --output-dir golden-corpus-output
+python scripts/run_golden_corpus.py --verbose-parts --output-dir golden-corpus-output
+python scripts/run_golden_corpus.py --json --output-dir golden-corpus-output
 ```
 
-- **CI:** `pytest` runs harness **unit tests** on every PR. Tests marked `golden_corpus` **skip** automatically when the large `.docx` binaries are not in the workspace; synthetic tests still validate counting and emit wiring.
+- **CI:** The main **CI** workflow runs `pytest` excluding `golden_corpus` (fast matrix). The **Golden regression** workflow runs `pytest -m golden_corpus`. Harness logic is always covered by synthetic tests (no `sample-docs` needed). Parametrized **harness smoke** tests skip individual pairs when those paths are missing. **Corpus baseline** tests (`tests/test_sample_docs_corpus_baseline.py`) require the corresponding `sample-docs/**/*.docx` files to exist; they skip per file if a path is absent (e.g. partial clone).
 
 Host-local option (if you prefer a local venv):
 
@@ -61,7 +69,7 @@ On every push and pull request, two workflows run:
 | Workflow | Purpose |
 |----------|---------|
 | `.github/workflows/tests.yml` (**CI**) | Guardrails, **pytest-matrix** (excludes `golden_corpus`) on Python 3.12 + 3.13 with coverage artifacts, **docker-make-test** (full `pytest` in Docker). |
-| `.github/workflows/golden-regression.yml` | **Golden regression** only: `pytest -m golden_corpus` (committed `sample-docs` baselines + harness smoke), log artifact. |
+| `.github/workflows/golden-regression.yml` | **Golden regression** only: `pytest -m golden_corpus` (harness smoke, corpus baselines, **snapshot count regression** vs `golden_corpus_expected.json` when `sample-docs` are present), log artifact. |
 
 Run the golden subset locally: `python -m pytest -m golden_corpus`.
 

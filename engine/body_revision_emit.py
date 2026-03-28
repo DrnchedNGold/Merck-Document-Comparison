@@ -8,6 +8,12 @@ inline ``DiffOp`` semantics.
 Package-wide emit (SCRUM-64 / MDC-011): ``word/document.xml`` plus each
 ``word/header*.xml`` / ``word/footer*.xml`` present in the original package,
 with one shared ``w:id`` counter across all revised parts.
+
+**OOXML scope:** Inserts/deletes are emitted with ``w:id``, ``w:author``, and ``w:date``
+(ECMA-376 Track Changes). The product catalog (MDC-010) does not currently require
+additional Word-specific attributes (for example ``w:rsid*`` on runs or paragraphs).
+If Word rejects or rewrites output on real sponsor documents, capture a failing case
+and extend markup in a dedicated parity task rather than guessing attributes here.
 """
 
 from __future__ import annotations

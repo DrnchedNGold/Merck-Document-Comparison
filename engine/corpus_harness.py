@@ -12,7 +12,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .contracts import CompareConfig
 from .docx_package_parts import (
@@ -79,6 +79,71 @@ def revision_counts_by_part(docx_path: Path) -> dict[str, Any]:
             "footers": {"ins": ftr_ins, "del": ftr_del},
         },
     }
+
+
+def normalize_report_snapshot(report: dict[str, Any]) -> dict[str, Any]:
+    """
+    Stable JSON shape for golden baselines: sorted ``by_part`` keys, POSIX paths.
+
+    ``summary`` is copied verbatim (``revision_counts_by_part`` already aggregates
+    document / headers / footers).
+    """
+
+    raw_bp = report.get("by_part", {})
+    by_part: dict[str, dict[str, int]] = {}
+    for key in sorted(raw_bp.keys()):
+        path = key.replace("\\", "/")
+        c = raw_bp[key]
+        by_part[path] = {"ins": int(c["ins"]), "del": int(c["del"])}
+    summ = report["summary"]
+    return {
+        "summary": {
+            "document": {
+                "ins": int(summ["document"]["ins"]),
+                "del": int(summ["document"]["del"]),
+            },
+            "headers": {
+                "ins": int(summ["headers"]["ins"]),
+                "del": int(summ["headers"]["del"]),
+            },
+            "footers": {
+                "ins": int(summ["footers"]["ins"]),
+                "del": int(summ["footers"]["del"]),
+            },
+        },
+        "by_part": by_part,
+    }
+
+
+def load_golden_expected_baseline(path: Path) -> dict[str, Any]:
+    """Load ``tests/fixtures/golden_corpus_expected.json`` (or a path with the same shape)."""
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data.get("pairs"), dict):
+        raise ValueError("Expected baseline JSON to have a top-level 'pairs' object.")
+    return data
+
+
+def iter_snapshot_mismatches(
+    actual: dict[str, Any], expected: dict[str, Any]
+) -> Iterator[str]:
+    """Yield human-readable diff lines when normalized reports differ."""
+
+    a = normalize_report_snapshot(actual)
+    e = normalize_report_snapshot(expected)
+    if a["summary"] != e["summary"]:
+        yield f"summary: {a['summary']!r} != {e['summary']!r}"
+    a_parts, e_parts = a["by_part"], e["by_part"]
+    if set(a_parts.keys()) != set(e_parts.keys()):
+        yield (
+            f"by_part keys differ: only_in_actual={set(a_parts.keys()) - set(e_parts.keys())} "
+            f"only_in_expected={set(e_parts.keys()) - set(a_parts.keys())}"
+        )
+    for path in sorted(set(a_parts.keys()) | set(e_parts.keys())):
+        if path not in e_parts or path not in a_parts:
+            continue
+        if a_parts[path] != e_parts[path]:
+            yield f"by_part[{path!r}]: {a_parts[path]!r} != {e_parts[path]!r}"
 
 
 @dataclass
@@ -212,3 +277,74 @@ def format_batch_text_report(batch: HarnessBatchResult) -> str:
                 f"{r.pair_id}\tfalse\t\t\t\t\t\t\t{r.error or 'unknown'}"
             )
     return "\n".join(lines)
+
+
+def format_batch_text_report_verbose(batch: HarnessBatchResult) -> str:
+    """
+    Default one-line TSV plus per-pair ``summary`` and sorted ``by_part`` lines for logs.
+    """
+
+    lines = [format_batch_text_report(batch), ""]
+    for r in batch.results:
+        lines.append(f"--- {r.pair_id} ---")
+        if not r.ok:
+            lines.append(f"error: {r.error or 'unknown'}")
+            lines.append("")
+            continue
+        if not r.report:
+            lines.append("report: (missing)")
+            lines.append("")
+            continue
+        snap = normalize_report_snapshot(r.report)
+        s = snap["summary"]
+        lines.append(
+            "summary\t"
+            f"doc_ins={s['document']['ins']}\tdoc_del={s['document']['del']}\t"
+            f"hdr_ins={s['headers']['ins']}\thdr_del={s['headers']['del']}\t"
+            f"ftr_ins={s['footers']['ins']}\tftr_del={s['footers']['del']}"
+        )
+        lines.append("by_part")
+        for path, c in snap["by_part"].items():
+            lines.append(f"  {path}\tins={c['ins']}\tdel={c['del']}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def harness_batch_to_json_dict(batch: HarnessBatchResult) -> dict[str, Any]:
+    """Structured batch result for ``--json`` (normalized ``report`` when present)."""
+
+    return {
+        "results": [
+            {
+                "pair_id": r.pair_id,
+                "ok": r.ok,
+                "error": r.error,
+                "report": normalize_report_snapshot(r.report)
+                if r.ok and r.report
+                else None,
+            }
+            for r in batch.results
+        ]
+    }
+
+
+def format_batch_report_json(batch: HarnessBatchResult) -> str:
+    return json.dumps(harness_batch_to_json_dict(batch), indent=2, sort_keys=True) + "\n"
+
+
+def build_expected_baseline_dict(batch: HarnessBatchResult) -> dict[str, Any]:
+    """
+    Payload written by :file:`scripts/refresh_golden_corpus_baseline.py`.
+
+    One entry per successful pair; failed pairs are omitted (refresh script should abort).
+    """
+
+    pairs: dict[str, Any] = {}
+    for r in batch.results:
+        if not r.ok or not r.report:
+            continue
+        pairs[r.pair_id] = normalize_report_snapshot(r.report)
+    return {
+        "version": 1,
+        "pairs": pairs,
+    }
