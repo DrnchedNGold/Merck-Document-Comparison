@@ -18,8 +18,8 @@ Assumptions and limits
       as any hash/LCS over equality).
     - No cross-paragraph move detection; reordering is expressed as delete +
       insert alignment pairs, not as a semantic "move" op.
-    - Tables, headers/footers, and non-body parts are out of scope until wired
-      into BodyIR the same way as body paragraphs.
+    - Table blocks are alignable units: signatures aggregate nested cell
+      paragraph content. Headers/footers and non-body parts remain separate work.
 """
 
 from __future__ import annotations
@@ -36,17 +36,30 @@ class ParagraphAlignment:
     revised_paragraph_index: int | None
 
 
-def _paragraph_signature(body_ir: BodyIR, paragraph_index: int, config: CompareConfig) -> str:
+def _block_signature(body_ir: BodyIR, block_index: int, config: CompareConfig) -> str:
     """
-    Compute a deterministic signature for a paragraph, based on normalized run keys.
+    Compute a deterministic signature for one top-level block (paragraph or table).
     """
 
     blocks = body_ir.get("blocks", [])
-    paragraph = blocks[paragraph_index]
-    paragraph_ir: BodyIR = {"version": body_ir["version"], "blocks": [paragraph]}
-    keys = generate_compare_keys(paragraph_ir, config)
-    # Drop the paragraph/run indices part by keeping only normalized text+format component.
-    return "|".join(k["key"].split(":", 1)[1] for k in keys)
+    block = blocks[block_index]
+    btype = block.get("type")
+    if btype == "paragraph":
+        paragraph_ir: BodyIR = {"version": body_ir["version"], "blocks": [block]}
+        keys = generate_compare_keys(paragraph_ir, config)
+        return "|".join(k["key"].split(":", 1)[1] for k in keys)
+    if btype == "table":
+        parts: list[str] = []
+        for row in block.get("rows", []):
+            for cell in row:
+                cell_ir: BodyIR = {
+                    "version": body_ir["version"],
+                    "blocks": cell["paragraphs"],
+                }
+                keys = generate_compare_keys(cell_ir, config)
+                parts.append("|".join(k["key"].split(":", 1)[1] for k in keys))
+        return "||".join(parts)
+    raise ValueError(f"Unsupported block type for alignment: {btype!r}.")
 
 
 def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -> list[ParagraphAlignment]:
@@ -62,8 +75,8 @@ def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -
     orig_blocks = original.get("blocks", [])
     rev_blocks = revised.get("blocks", [])
 
-    orig_sigs = [_paragraph_signature(original, i, config) for i in range(len(orig_blocks))]
-    rev_sigs = [_paragraph_signature(revised, i, config) for i in range(len(rev_blocks))]
+    orig_sigs = [_block_signature(original, i, config) for i in range(len(orig_blocks))]
+    rev_sigs = [_block_signature(revised, i, config) for i in range(len(rev_blocks))]
 
     # LCS DP table.
     m, n = len(orig_sigs), len(rev_sigs)

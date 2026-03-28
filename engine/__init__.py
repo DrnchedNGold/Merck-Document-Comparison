@@ -6,6 +6,8 @@ from .contracts import (
     BodyIR,
     BodyParagraph,
     BodyRun,
+    BodyTable,
+    BodyTableCell,
     CompareConfig,
     DiffOp,
     validate_body_ir,
@@ -21,6 +23,7 @@ from .compare_keys import (
 from .body_compare import MatchedParagraphDiff, matched_paragraph_inline_diffs, single_paragraph_body
 from .inline_run_diff import inline_diff_single_paragraph
 from .paragraph_alignment import ParagraphAlignment, align_paragraphs
+from .table_diff import diff_table_blocks
 from .preflight_validation import (
     CommentsDetectedError,
     InvalidDocxFileTypeError,
@@ -36,6 +39,8 @@ __all__ = [
     "BodyIR",
     "BodyParagraph",
     "BodyRun",
+    "BodyTable",
+    "BodyTableCell",
     "CompareConfig",
     "DiffOp",
     "DocumentXmlMissingError",
@@ -45,6 +50,7 @@ __all__ = [
     "align_runs_by_compare_keys",
     "ParagraphAlignment",
     "align_paragraphs",
+    "diff_table_blocks",
     "inline_diff_single_paragraph",
     "MatchedParagraphDiff",
     "matched_paragraph_inline_diffs",

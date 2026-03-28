@@ -50,10 +50,22 @@ def _format_signature(run: dict, config: CompareConfig) -> str:
 
 
 def _iter_runs(body_ir: BodyIR) -> Iterable[tuple[int, int, dict]]:
-    for paragraph_index, paragraph in enumerate(body_ir.get("blocks", [])):
-        runs = paragraph.get("runs", [])
-        for run_index, run in enumerate(runs):
-            yield paragraph_index, run_index, run
+    """Yield ``(paragraph_index, run_index, run)`` with paragraph_index global in reading order."""
+
+    paragraph_index = 0
+    for block in body_ir.get("blocks", []):
+        btype = block.get("type")
+        if btype == "paragraph":
+            for run_index, run in enumerate(block.get("runs", [])):
+                yield paragraph_index, run_index, run
+            paragraph_index += 1
+        elif btype == "table":
+            for row in block.get("rows", []):
+                for cell in row:
+                    for para in cell.get("paragraphs", []):
+                        for run_index, run in enumerate(para.get("runs", [])):
+                            yield paragraph_index, run_index, run
+                        paragraph_index += 1
 
 
 def generate_compare_keys(body_ir: BodyIR, config: CompareConfig) -> list[CompareKey]:

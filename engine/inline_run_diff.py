@@ -36,12 +36,14 @@ def inline_diff_single_paragraph(
     config: CompareConfig,
     *,
     path_block_index: int = 0,
+    path_prefix: str | None = None,
 ) -> list[DiffOp]:
     """
     Produce deterministic, ordered diff ops for one aligned paragraph pair.
 
     Text is the concatenation of per-run text after the same normalization used
-    for compare keys. Paths are stable render targets: ``blocks/{path_block_index}/inline/{n}``.
+    for compare keys.     Paths are stable render targets: ``blocks/{path_block_index}/inline/{n}``,
+    or ``{path_prefix}/inline/{n}`` when ``path_prefix`` is set (table cells).
     """
 
     orig_para = _single_paragraph(original)
@@ -57,7 +59,10 @@ def inline_diff_single_paragraph(
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
-        path = f"blocks/{path_block_index}/inline/{op_index}"
+        if path_prefix is not None:
+            path = f"{path_prefix}/inline/{op_index}"
+        else:
+            path = f"blocks/{path_block_index}/inline/{op_index}"
         op_index += 1
 
         if tag == "delete":

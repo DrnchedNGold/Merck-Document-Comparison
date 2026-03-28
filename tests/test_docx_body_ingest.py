@@ -87,6 +87,68 @@ def test_parse_docx_body_ir_skips_runs_with_no_text_nodes(tmp_path: Path) -> Non
     assert body_ir["blocks"][0]["runs"] == [{"text": "Visible text only."}]
 
 
+def test_parse_docx_body_ir_includes_table_block(tmp_path: Path) -> None:
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Intro.</w:t></w:r>
+    </w:p>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:p><w:r><w:t>Cell A</w:t></w:r></w:p>
+        </w:tc>
+        <w:tc>
+          <w:p><w:r><w:t>Cell B</w:t></w:r></w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>
+"""
+
+    docx_path = _make_docx_with_document_xml(tmp_path, document_xml)
+    body_ir = parse_docx_body_ir(docx_path)
+
+    assert body_ir == {
+        "version": 1,
+        "blocks": [
+            {
+                "type": "paragraph",
+                "id": "p1",
+                "runs": [{"text": "Intro."}],
+            },
+            {
+                "type": "table",
+                "id": "t1",
+                "rows": [
+                    [
+                        {
+                            "paragraphs": [
+                                {
+                                    "type": "paragraph",
+                                    "id": "p2",
+                                    "runs": [{"text": "Cell A"}],
+                                }
+                            ]
+                        },
+                        {
+                            "paragraphs": [
+                                {
+                                    "type": "paragraph",
+                                    "id": "p3",
+                                    "runs": [{"text": "Cell B"}],
+                                }
+                            ]
+                        },
+                    ]
+                ],
+            },
+        ],
+    }
+
+
 def test_load_word_document_xml_root_parses_document(tmp_path: Path) -> None:
     document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="{WORD_NS}">

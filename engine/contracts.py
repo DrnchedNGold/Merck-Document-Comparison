@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-BodyBlockType = Literal["paragraph"]
+BodyBlockType = Literal["paragraph", "table"]
 DiffOpKind = Literal["insert", "delete", "replace"]
 BodyIRVersion = Literal[1]
 
@@ -25,16 +25,30 @@ class BodyRun(TypedDict, total=False):
 class BodyParagraph(TypedDict):
     """Paragraph block in body IR."""
 
-    type: BodyBlockType
+    type: Literal["paragraph"]
     id: str
     runs: list[BodyRun]
+
+
+class BodyTableCell(TypedDict):
+    """One table cell: ordered paragraphs (common Word `w:tc` → `w:p` sequences)."""
+
+    paragraphs: list[BodyParagraph]
+
+
+class BodyTable(TypedDict):
+    """Table block: rows of cells (common `w:tbl` → `w:tr` → `w:tc`)."""
+
+    type: Literal["table"]
+    id: str
+    rows: list[list[BodyTableCell]]
 
 
 class BodyIR(TypedDict):
     """Top-level body IR container."""
 
     version: BodyIRVersion
-    blocks: list[BodyParagraph]
+    blocks: list[BodyParagraph | BodyTable]
 
 
 class DiffOp(TypedDict):
@@ -65,6 +79,64 @@ DEFAULT_WORD_LIKE_COMPARE_CONFIG: CompareConfig = {
 ALLOWED_DIFF_OPS: tuple[DiffOpKind, ...] = ("insert", "delete", "replace")
 
 
+def _validate_paragraph_block(block_index: str, block: dict) -> list[str]:
+    errors: list[str] = []
+    if block.get("type") != "paragraph":
+        errors.append(f"{block_index} must have type='paragraph'.")
+    if not isinstance(block.get("id"), str) or not block["id"]:
+        errors.append(f"{block_index} must have a non-empty string id.")
+    runs = block.get("runs")
+    if not isinstance(runs, list):
+        return errors + [f"{block_index} runs must be a list."]
+    for run_index, run in enumerate(runs):
+        if not isinstance(run.get("text"), str):
+            errors.append(
+                f"{block_index} run {run_index} must include string text."
+            )
+    return errors
+
+
+def _validate_table_block(block_index: int, block: dict) -> list[str]:
+    errors: list[str] = []
+    if block.get("type") != "table":
+        errors.append(f"Block {block_index} must have type='table'.")
+        return errors
+    if not isinstance(block.get("id"), str) or not block["id"]:
+        errors.append(f"Block {block_index} must have a non-empty string id.")
+    rows = block.get("rows")
+    if not isinstance(rows, list):
+        return errors + [f"Block {block_index} rows must be a list."]
+    for r, row in enumerate(rows):
+        if not isinstance(row, list):
+            errors.append(f"Block {block_index} row {r} must be a list.")
+            continue
+        for c, cell in enumerate(row):
+            if not isinstance(cell, dict):
+                errors.append(
+                    f"Block {block_index} row {r} cell {c} must be an object."
+                )
+                continue
+            paras = cell.get("paragraphs")
+            if not isinstance(paras, list):
+                errors.append(
+                    f"Block {block_index} row {r} cell {c} paragraphs must be a list."
+                )
+                continue
+            for pi, para in enumerate(paras):
+                if not isinstance(para, dict):
+                    errors.append(
+                        f"Block {block_index} row {r} cell {c} paragraph {pi} must be an object."
+                    )
+                    continue
+                errors.extend(
+                    _validate_paragraph_block(
+                        f"Block {block_index} row {r} cell {c} paragraph {pi}",
+                        para,
+                    )
+                )
+    return errors
+
+
 def validate_body_ir(body_ir: BodyIR) -> list[str]:
     """Return contract violations for a body IR payload."""
     errors: list[str] = []
@@ -76,19 +148,18 @@ def validate_body_ir(body_ir: BodyIR) -> list[str]:
         return errors + ["Body IR blocks must be a list."]
 
     for block_index, block in enumerate(blocks):
-        if block.get("type") != "paragraph":
-            errors.append(f"Block {block_index} must have type='paragraph'.")
-        if not isinstance(block.get("id"), str) or not block["id"]:
-            errors.append(f"Block {block_index} must have a non-empty string id.")
-        runs = block.get("runs")
-        if not isinstance(runs, list):
-            errors.append(f"Block {block_index} runs must be a list.")
+        if not isinstance(block, dict):
+            errors.append(f"Block {block_index} must be an object.")
             continue
-        for run_index, run in enumerate(runs):
-            if not isinstance(run.get("text"), str):
-                errors.append(
-                    f"Block {block_index} run {run_index} must include string text."
-                )
+        btype = block.get("type")
+        if btype == "paragraph":
+            errors.extend(_validate_paragraph_block(f"Block {block_index}", block))
+        elif btype == "table":
+            errors.extend(_validate_table_block(block_index, block))
+        else:
+            errors.append(
+                f"Block {block_index} must have type 'paragraph' or 'table'."
+            )
     return errors
 
 
