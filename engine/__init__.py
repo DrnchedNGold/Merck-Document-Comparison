@@ -30,7 +30,13 @@ from .body_compare import (
     matched_paragraph_inline_diffs,
     single_paragraph_body,
 )
+from .body_revision_emit import (
+    apply_body_track_changes_to_document_root,
+    build_paragraph_track_change_elements,
+    emit_docx_with_body_track_changes,
+)
 from .document_package import DocumentPackageIR, parse_docx_document_package
+from .docx_output_package import write_docx_copy_with_part_replacements
 from .docx_package_parts import DOCUMENT_PART_PATH, discover_header_footer_part_paths
 from .inline_run_diff import inline_diff_single_paragraph
 from .paragraph_alignment import ParagraphAlignment, align_paragraphs
@@ -62,6 +68,9 @@ __all__ = [
     "parse_docx_document_package",
     "DOCUMENT_PART_PATH",
     "discover_header_footer_part_paths",
+    "apply_body_track_changes_to_document_root",
+    "build_paragraph_track_change_elements",
+    "emit_docx_with_body_track_changes",
     "matched_document_package_inline_diffs",
     "generate_compare_keys",
     "align_runs_by_compare_keys",
@@ -76,6 +85,7 @@ __all__ = [
     "validate_compare_config",
     "validate_diff_ops",
     "validate_docx_for_preflight",
+    "write_docx_copy_with_part_replacements",
     "PreflightValidationError",
     "InvalidDocxFileTypeError",
     "InvalidDocxZipFileError",
