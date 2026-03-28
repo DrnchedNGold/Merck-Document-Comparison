@@ -48,13 +48,39 @@ def test_validate_body_ir_rejects_non_list_blocks() -> None:
     assert any("blocks must be a list" in e for e in errors)
 
 
-def test_validate_body_ir_rejects_bad_paragraph_type() -> None:
+def test_validate_body_ir_rejects_unknown_block_type() -> None:
     body_ir = {
         "version": 1,
-        "blocks": [{"type": "table", "id": "t1", "runs": []}],
+        "blocks": [{"type": "bullet", "id": "t1", "runs": []}],
     }
     errors = validate_body_ir(body_ir)  # type: ignore[arg-type]
-    assert any("type='paragraph'" in e for e in errors)
+    assert any("type 'paragraph' or 'table'" in e for e in errors)
+
+
+def test_validate_body_ir_accepts_minimal_table_block() -> None:
+    body_ir = {
+        "version": 1,
+        "blocks": [
+            {
+                "type": "table",
+                "id": "t1",
+                "rows": [
+                    [
+                        {
+                            "paragraphs": [
+                                {
+                                    "type": "paragraph",
+                                    "id": "p1",
+                                    "runs": [{"text": "x"}],
+                                }
+                            ]
+                        }
+                    ]
+                ],
+            }
+        ],
+    }
+    assert validate_body_ir(body_ir) == []
 
 
 def test_validate_body_ir_rejects_empty_paragraph_id() -> None:

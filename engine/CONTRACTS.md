@@ -9,12 +9,18 @@ Top-level shape:
 - `version` (int): currently `1`
 - `blocks` (list): ordered body blocks
 
-Current block type:
+Current block types:
 
 - `paragraph`
   - `type`: `"paragraph"`
   - `id`: stable block identifier
   - `runs`: list of runs
+
+- `table`
+  - `type`: `"table"`
+  - `id`: stable block identifier
+  - `rows`: list of rows; each row is a list of cells
+  - `cell`: `{ "paragraphs": [ BodyParagraph, ... ] }` (common `w:tc` → `w:p` sequences)
 
 Run shape:
 
@@ -37,7 +43,8 @@ Notes:
 - `insert` typically uses `before = null`
 - `delete` typically uses `after = null`
 - `replace` usually has both values present
-- Inline paragraph diffs (MDC-007) use paths like `blocks/{paragraph_index}/inline/0`, `blocks/{paragraph_index}/inline/1`, … in document order (`paragraph_index` is 0 when using single-paragraph `BodyIR` defaults).
+- Inline paragraph diffs (MDC-007) use paths like `blocks/{block_index}/inline/0`, `blocks/{block_index}/inline/1`, … in document order (`block_index` is 0 when using single-paragraph `BodyIR` defaults).
+- Table cell diffs (MDC-008) use paths like `blocks/{block_index}/rows/{r}/cells/{c}/inline/{n}`. Whole-table shape mismatches may use `blocks/{block_index}/table`.
 
 ## 3) Compare Config (Word-like default stub)
 

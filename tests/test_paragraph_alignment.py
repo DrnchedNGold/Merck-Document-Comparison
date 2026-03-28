@@ -1,5 +1,5 @@
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
-from engine.paragraph_alignment import align_paragraphs
+from engine.paragraph_alignment import ParagraphAlignment, align_paragraphs
 
 
 def _p(text: str) -> dict:
@@ -68,6 +68,26 @@ def test_alignment_insert_all_paragraphs_when_original_empty() -> None:
     alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
     pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
     assert pairs == [(None, 0), (None, 1)]
+
+
+def test_alignment_matches_identical_table_blocks() -> None:
+    table = {
+        "type": "table",
+        "id": "t1",
+        "rows": [
+            [
+                {
+                    "paragraphs": [
+                        {"type": "paragraph", "id": "p1", "runs": [{"text": "x"}]},
+                    ]
+                }
+            ]
+        ],
+    }
+    original = {"version": 1, "blocks": [table]}
+    revised = {"version": 1, "blocks": [table]}
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert alignment == [ParagraphAlignment(0, 0)]
 
 
 def test_alignment_delete_all_paragraphs_when_revised_empty() -> None:
