@@ -1,7 +1,7 @@
 """Tests for desktop shell behavior.
 
-Validation and file-dialog wiring are exercised without Tk via :mod:`desktop.desktop_state`.
-A single optional test instantiates a real window when a display is available (local dev).
+Validation and file-dialog wiring are tested without Tk via :mod:`desktop.desktop_state`.
+One optional test creates a Tk root when a display is available; otherwise it skips.
 """
 
 from __future__ import annotations
@@ -76,16 +76,22 @@ def test_pick_path_via_dialog_cancel_returns_empty() -> None:
     assert pick_path_via_dialog(cancel, title="t", filetypes=[]) == ""
 
 
-@pytest.mark.skipif(
-    not tk_display_environment_ready(),
-    reason="No display (headless); Tk root not available",
-)
 def test_desktop_window_instantiates() -> None:
-    pytest.importorskip("tkinter")
+    """Creates a real Tk root only when a display exists; skips cleanly in headless CI."""
+    tk = pytest.importorskip("tkinter")
     from desktop.main_window import MerckDesktopApp
 
-    app = MerckDesktopApp()
-    app.withdraw()
-    app.update_idletasks()
-    assert app.winfo_exists()
-    app.destroy()
+    if not tk_display_environment_ready():
+        pytest.skip("No display available (headless environment)")
+
+    try:
+        app = MerckDesktopApp()
+        app.withdraw()
+        app.update_idletasks()
+        assert app.winfo_exists()
+        app.destroy()
+    except tk.TclError as err:
+        err_l = str(err).lower()
+        if "display" in err_l or "no $display" in err_l:
+            pytest.skip(f"Tk display not available: {err}")
+        raise

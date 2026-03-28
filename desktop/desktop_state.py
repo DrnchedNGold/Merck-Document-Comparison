@@ -12,7 +12,7 @@ FileDialogFn = Callable[..., str | tuple[str, ...]]
 
 
 def tk_display_environment_ready() -> bool:
-    """True if creating a :class:`tkinter.Tk` root is expected to work (headless Linux is False)."""
+    """Heuristic for whether :class:`tkinter.Tk` can be created (headless Linux CI is usually False)."""
     if sys.platform in ("win32", "darwin"):
         return True
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
