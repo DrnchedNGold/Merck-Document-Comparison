@@ -29,6 +29,14 @@ Run shape:
 - `italic` (bool, optional)
 - `underline` (bool, optional)
 
+## 1b) Document package IR (SCRUM-49)
+
+Top-level shape for body + header/footer parts:
+
+- `version` (int): currently `1`
+- `document` (`BodyIR`): content from `word/document.xml`
+- `header_footer` (object): map from OOXML zip paths (`word/header1.xml`, `word/footer1.xml`, …) to `BodyIR` for that part’s structural content (`w:hdr` / `w:ftr` children, same block shapes as the body)
+
 ## 2) Diff Ops (v1)
 
 Each diff op has:
@@ -37,6 +45,7 @@ Each diff op has:
 - `path`: logical selector (for example `blocks/0/runs/1`)
 - `before`: prior text value (string or `null`)
 - `after`: new text value (string or `null`)
+- `part` (string, optional): OOXML zip path for the target XML part (for example `word/document.xml`, `word/header1.xml`). Omitted on legacy body-only diffs; set when comparing a full document package so emitters can route revisions to the correct part.
 
 Notes:
 

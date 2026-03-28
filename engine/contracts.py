@@ -6,7 +6,7 @@ It does not implement DOCX parsing or diff generation.
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 BodyBlockType = Literal["paragraph", "table"]
 DiffOpKind = Literal["insert", "delete", "replace"]
@@ -58,6 +58,7 @@ class DiffOp(TypedDict):
     path: str
     before: str | None
     after: str | None
+    part: NotRequired[str]
 
 
 class CompareConfig(TypedDict):
@@ -175,6 +176,8 @@ def validate_diff_ops(diff_ops: list[DiffOp]) -> list[str]:
             errors.append(f"Diff op {index} before must be string or null.")
         if not isinstance(op.get("after"), (str, type(None))):
             errors.append(f"Diff op {index} after must be string or null.")
+        if "part" in op and not isinstance(op["part"], str):
+            errors.append(f"Diff op {index} part must be a string when present.")
     return errors
 
 

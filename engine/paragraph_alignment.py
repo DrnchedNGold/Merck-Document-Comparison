@@ -19,7 +19,8 @@ Assumptions and limits
     - No cross-paragraph move detection; reordering is expressed as delete +
       insert alignment pairs, not as a semantic "move" op.
     - Table blocks are alignable units: signatures aggregate nested cell
-      paragraph content. Headers/footers and non-body parts remain separate work.
+      paragraph content. Header/footer parts are separate ``BodyIR`` values per
+      OOXML part (see :func:`engine.document_package.parse_docx_document_package`).
 """
 
 from __future__ import annotations

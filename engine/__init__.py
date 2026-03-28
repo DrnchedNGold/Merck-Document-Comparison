@@ -14,13 +14,24 @@ from .contracts import (
     validate_compare_config,
     validate_diff_ops,
 )
-from .docx_body_ingest import DocumentXmlMissingError, parse_docx_body_ir
+from .docx_body_ingest import (
+    DocumentXmlMissingError,
+    parse_docx_body_ir,
+    parse_structural_blocks_from_element,
+)
 from .compare_keys import (
     CompareKey,
     align_runs_by_compare_keys,
     generate_compare_keys,
 )
-from .body_compare import MatchedParagraphDiff, matched_paragraph_inline_diffs, single_paragraph_body
+from .body_compare import (
+    MatchedParagraphDiff,
+    matched_document_package_inline_diffs,
+    matched_paragraph_inline_diffs,
+    single_paragraph_body,
+)
+from .document_package import DocumentPackageIR, parse_docx_document_package
+from .docx_package_parts import DOCUMENT_PART_PATH, discover_header_footer_part_paths
 from .inline_run_diff import inline_diff_single_paragraph
 from .paragraph_alignment import ParagraphAlignment, align_paragraphs
 from .table_diff import diff_table_blocks
@@ -46,6 +57,12 @@ __all__ = [
     "DocumentXmlMissingError",
     "CompareKey",
     "parse_docx_body_ir",
+    "parse_structural_blocks_from_element",
+    "DocumentPackageIR",
+    "parse_docx_document_package",
+    "DOCUMENT_PART_PATH",
+    "discover_header_footer_part_paths",
+    "matched_document_package_inline_diffs",
     "generate_compare_keys",
     "align_runs_by_compare_keys",
     "ParagraphAlignment",

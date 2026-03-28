@@ -10,6 +10,27 @@ def _p(runs: list[dict]) -> dict:
     return {"version": 1, "blocks": [{"type": "paragraph", "id": "p1", "runs": runs}]}
 
 
+def test_inline_diff_stamps_part_when_diff_part_set() -> None:
+    original = _p([{"text": "foo"}])
+    revised = _p([{"text": "bar"}])
+    ops = inline_diff_single_paragraph(
+        original,
+        revised,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        diff_part="word/header1.xml",
+    )
+    assert ops == [
+        {
+            "op": "replace",
+            "path": "blocks/0/inline/0",
+            "before": "foo",
+            "after": "bar",
+            "part": "word/header1.xml",
+        },
+    ]
+    assert validate_diff_ops(ops) == []
+
+
 def test_inline_diff_insert_within_one_paragraph() -> None:
     original = _p([{"text": "Hello"}])
     revised = _p([{"text": "Hello world"}])
