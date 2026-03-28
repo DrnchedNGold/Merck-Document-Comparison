@@ -1,0 +1,44 @@
+# Dedicated golden / sample-docs regression pipeline (SCRUM-72 / SCRUM-73).
+# Runs in parallel with `.github/workflows/tests.yml` (CI). Repo settings can
+# require both checks on `main` if desired.
+#
+# Scope: `pytest -m golden_corpus` only — see tests/test_sample_docs_corpus_baseline.py
+# and tests/test_golden_corpus_harness.py.
+
+name: Golden regression
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  golden-regression:
+    name: golden regression (sample-docs + harness)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run golden_corpus-marked tests
+        run: |
+          set -o pipefail
+          python -m pytest -m golden_corpus -v --tb=short 2>&1 | tee golden-regression.log
+
+      - name: Upload golden regression log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-regression-log
+          path: golden-regression.log
