@@ -100,6 +100,28 @@ def _parse_table_element(
     return {"type": "table", "id": tid, "rows": rows}
 
 
+def parse_structural_blocks_from_element(container: ET.Element) -> BodyIR:
+    """
+    Parse top-level `w:p` / `w:tbl` sequences from a container element.
+
+    Used for `w:body` in `word/document.xml` and for `w:hdr` / `w:ftr` roots in
+    header/footer parts (SCRUM-49).
+    """
+
+    paragraph_counter = [0]
+    table_counter = [0]
+    blocks: list[BodyParagraph | BodyTable] = []
+
+    for child in container:
+        tag = _local_name(child.tag)
+        if tag == "p":
+            blocks.append(_parse_paragraph_element(child, paragraph_counter))
+        elif tag == "tbl":
+            blocks.append(_parse_table_element(child, table_counter, paragraph_counter))
+
+    return {"version": 1, "blocks": blocks}
+
+
 def parse_docx_body_ir(docx_path: Union[str, Path]) -> BodyIR:
     """
     Parse `word/document.xml` from a `.docx` and convert it into `BodyIR`.
@@ -116,15 +138,4 @@ def parse_docx_body_ir(docx_path: Union[str, Path]) -> BodyIR:
     if body is None:
         return {"version": 1, "blocks": []}
 
-    paragraph_counter = [0]
-    table_counter = [0]
-    blocks: list[BodyParagraph | BodyTable] = []
-
-    for child in body:
-        tag = _local_name(child.tag)
-        if tag == "p":
-            blocks.append(_parse_paragraph_element(child, paragraph_counter))
-        elif tag == "tbl":
-            blocks.append(_parse_table_element(child, table_counter, paragraph_counter))
-
-    return {"version": 1, "blocks": blocks}
+    return parse_structural_blocks_from_element(body)

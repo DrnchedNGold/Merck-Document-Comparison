@@ -17,6 +17,18 @@ def test_single_paragraph_body_extracts_block() -> None:
     assert one == {"version": 1, "blocks": [_block([{"text": "b"}], "1")]}
 
 
+def test_matched_paragraph_inline_diffs_sets_part_when_requested() -> None:
+    cfg = DEFAULT_WORD_LIKE_COMPARE_CONFIG
+    original = {"version": 1, "blocks": [_block([{"text": "x"}]), _block([{"text": "y"}])]}
+    revised = {"version": 1, "blocks": [_block([{"text": "x"}]), _block([{"text": "y"}])]}
+    rows = matched_paragraph_inline_diffs(
+        original, revised, cfg, part="word/footer1.xml"
+    )
+    assert len(rows) == 2
+    assert all(r.part == "word/footer1.xml" for r in rows)
+    assert rows[0].diff_ops == []
+
+
 def test_matched_paragraph_inline_diffs_empty_when_all_signatures_match() -> None:
     cfg = DEFAULT_WORD_LIKE_COMPARE_CONFIG
     original = {"version": 1, "blocks": [_block([{"text": "x"}]), _block([{"text": "y"}])]}
