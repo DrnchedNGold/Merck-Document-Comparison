@@ -30,6 +30,20 @@ make test
 
 This runs tests in Docker with Python 3.12+.
 
+### Golden corpus regression harness (MDC-012)
+
+The repo includes a **config-driven harness** that runs the engine emit path on sponsor pairs under `sample-docs/` and prints **`w:ins` / `w:del` counts** per OOXML part, summarized as **document vs headers vs footers**.
+
+- **Pair list:** `tests/fixtures/golden_corpus_pairs.json` (paths relative to `sample-docs/`). It includes at least one pair from **`email1docs`**, **`email2docs`**, and **`email3docs`** (see `sample-docs/CORPUS-INVENTORY.md`).
+- **Staged rollout:** Start with a single stable pair (edit the JSON to one entry, or pass a smaller JSON via `--config`), confirm reports locally, then restore the full list for complete corpus coverage.
+- **CLI** (from repo root, with sponsor `.docx` files present):
+
+```bash
+python scripts/run_golden_corpus.py --output-dir golden-corpus-output
+```
+
+- **CI:** `pytest` runs harness **unit tests** on every PR. Tests marked `golden_corpus` **skip** automatically when the large `.docx` binaries are not in the workspace; synthetic tests still validate counting and emit wiring.
+
 Host-local option (if you prefer a local venv):
 
 ```bash
