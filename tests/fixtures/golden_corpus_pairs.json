@@ -1,0 +1,46 @@
+{
+  "pairs": [
+    {
+      "id": "email1-bladder",
+      "corpus_folder": "email1docs",
+      "original": "email1docs/diversity-plan-bladder-cancer-version1.docx",
+      "revised": "email1docs/diversity-plan-bladder-cancer-version2.docx"
+    },
+    {
+      "id": "email1-cervical",
+      "corpus_folder": "email1docs",
+      "original": "email1docs/diversity-plan-cervical-cancer-version1.docx",
+      "revised": "email1docs/diversity-plan-cervical-cancer-version2.docx"
+    },
+    {
+      "id": "email2-v940",
+      "corpus_folder": "email2docs",
+      "original": "email2docs/ind-general-investigation-plan-V940-v1.docx",
+      "revised": "email2docs/ind-general-investigation-plan-V940-v4.docx"
+    },
+    {
+      "id": "email3-protocol-1026",
+      "corpus_folder": "email3docs",
+      "original": "email3docs/1026-010-02.docx",
+      "revised": "email3docs/1026-010-04.docx"
+    },
+    {
+      "id": "email3-protocol-7902",
+      "corpus_folder": "email3docs",
+      "original": "email3docs/7902-010-04.docx",
+      "revised": "email3docs/7902-010-05.docx"
+    },
+    {
+      "id": "email3-ib-6-8",
+      "corpus_folder": "email3docs",
+      "original": "email3docs/ib-edition-6.docx",
+      "revised": "email3docs/ib-edition-8.docx"
+    },
+    {
+      "id": "email3-ib-10-11",
+      "corpus_folder": "email3docs",
+      "original": "email3docs/ib-edition-10.docx",
+      "revised": "email3docs/ib-edition-11.docx"
+    }
+  ]
+}

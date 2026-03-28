@@ -57,6 +57,12 @@ Verification note: `docs/SCRUM-100-SPRINT3-AUDIT.md` (SCRUM-100) confirms catalo
 
 **Orchestration:** `engine/body_compare.py` — `matched_paragraph_inline_diffs` aligns top-level blocks (paragraphs and tables) and emits inline diffs for paragraph pairs and `diff_table_blocks` for aligned table pairs; `matched_document_package_inline_diffs` runs the same over `word/document.xml` and each header/footer part. Tests: `tests/test_body_compare.py`, `tests/test_docx_header_footer_package.py`.
 
+## Sprint 4 — golden harness (Phase 4 slice, SCRUM-68)
+
+| Catalog | Location | Tests / runner |
+|--------|----------|----------------|
+| MDC-012 | `engine/corpus_harness.py`, `tests/fixtures/golden_corpus_pairs.json`, `scripts/run_golden_corpus.py` | `tests/test_golden_corpus_harness.py` (synthetic + optional `golden_corpus` marker when `sample-docs` binaries exist); `README.md` rollout notes |
+
 ## Dependency sketch (simplified)
 
 ```text
