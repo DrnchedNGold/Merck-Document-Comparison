@@ -45,6 +45,18 @@ Verification note: `docs/SCRUM-48-SPRINT2-AUDIT.md` (SCRUM-48) confirms catalog 
 
 Optional orchestration (post-SCRUM-48): `engine/body_compare.py` (`matched_paragraph_inline_diffs`), tests in `tests/test_body_compare.py`.
 
+## Sprint 3 — implementation map (Phase 2 + minimal Phase 3.1)
+
+Verification note: `docs/SCRUM-100-SPRINT3-AUDIT.md` (SCRUM-100) confirms catalog acceptance for MDC-008–010 against the repo.
+
+| Catalog | Engine module(s) | Tests |
+|--------|-------------------|--------|
+| MDC-008 | `engine/contracts.py` (`BodyTable`, …), `engine/docx_body_ingest.py` (`w:tbl` → IR), `engine/table_diff.py` | `tests/test_docx_body_ingest.py` (table fixture), `tests/test_table_diff.py` |
+| MDC-009 | `engine/docx_package_parts.py`, `engine/document_package.py` | `tests/test_docx_header_footer_package.py` |
+| MDC-010 | `engine/body_revision_emit.py`, `engine/docx_output_package.py` | `tests/test_body_track_changes_output.py` |
+
+**Orchestration:** `engine/body_compare.py` — `matched_paragraph_inline_diffs` aligns top-level blocks (paragraphs and tables) and emits inline diffs for paragraph pairs and `diff_table_blocks` for aligned table pairs; `matched_document_package_inline_diffs` runs the same over `word/document.xml` and each header/footer part. Tests: `tests/test_body_compare.py`, `tests/test_docx_header_footer_package.py`.
+
 ## Dependency sketch (simplified)
 
 ```text

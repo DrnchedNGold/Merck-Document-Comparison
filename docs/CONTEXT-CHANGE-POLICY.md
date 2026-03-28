@@ -39,3 +39,5 @@ Keep a short history of significant context updates.
 - 2026-03-26: SCRUM-40 expanded with `email3docs/` (Protocol + IB corpus); updated planning/context docs and corpus expectations to include all three email sample sets.
 - 2026-03-27: SCRUM-48 added Sprint 2 implementation map to `docs/PROJECT-PLAN-V1.md` and `docs/SCRUM-48-SPRINT2-AUDIT.md` for MDC-005–007 verification traceability.
 - 2026-03-27: Expanded `docs/AI-JIRA-TASKS-SUGGESTIONS.md` with optional tasks per sprint; documented optional `engine/body_compare.py` orchestration in project plan + Sprint 2 audit.
+- 2026-03-27: SCRUM-100 added Sprint 3 implementation map to `docs/PROJECT-PLAN-V1.md` and `docs/SCRUM-100-SPRINT3-AUDIT.md` for MDC-008–010 verification traceability.
+- 2026-03-27: SCRUM-100 — `matched_paragraph_inline_diffs` now emits `diff_table_blocks` results for aligned table pairs; project plan + Sprint 3 audit updated accordingly.
