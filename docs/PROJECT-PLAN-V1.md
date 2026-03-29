@@ -63,6 +63,22 @@ Verification note: `docs/SCRUM-100-SPRINT3-AUDIT.md` (SCRUM-100) confirms catalo
 |--------|----------|----------------|
 | MDC-012 | `engine/corpus_harness.py`, `tests/fixtures/golden_corpus_pairs.json`, `scripts/run_golden_corpus.py` | `tests/test_golden_corpus_harness.py` (synthetic + optional `golden_corpus` marker when `sample-docs` binaries exist); `README.md` rollout notes |
 
+Other Sprint 4 catalog items (MDC-011 revision metadata / MDC-013 CI) are implemented elsewhere in the repo; see `docs/V1-ACCEPTANCE-CATALOG.md` and `docs/CONTEXT-CHANGE-POLICY.md` changelog.
+
+## Sprint 5 — Desktop MVP + wiring (Phase 5)
+
+Verification note: **MDC-014** (desktop shell) and **MDC-015** (engine CLI + desktop invoke + open output) are implemented and covered by tests below. **MDC-016–018** remain per catalog (settings UI, richer error UX, stretch move detection) unless listed as done in a future audit.
+
+| Catalog | Location | Tests |
+|--------|----------|--------|
+| MDC-014 | `desktop/main_window.py`, `desktop/desktop_state.py`, `desktop/__main__.py` | `tests/test_desktop_smoke.py` (validation + optional Tk smoke); `desktop/` pickers wired without stub-only compare |
+| MDC-015 | `engine/compare_cli.py` (also `merck-compare` in `pyproject.toml`), `desktop/engine_runner.py` (`python -m engine.compare_cli`, optional `--config`), `desktop/main_window.py` (subprocess compare, stderr on failure, **Open output** via OS default app); user docs `docs/CLI-MERCK-COMPARE.md`, man page `man/man1/merck-compare.1` | `tests/test_compare_cli.py`, `tests/test_desktop_engine_runner.py` |
+| MDC-016 | *Backlog:* profile JSON in UI driving `--config` — not yet a full settings screen | — |
+| MDC-017 | *Partial:* desktop shows CLI **stderr** on failure; dedicated exit-code → message table in README is catalog follow-up | — |
+| MDC-018 | *Stretch / backlog* | — |
+
+**MDC-015 suggested subtasks (all implemented):** CLI entry + argparse schema (`engine/compare_cli.py`); stable exit codes + stderr messages (`classify_engine_failure`, `main`); desktop subprocess + `PYTHONPATH` (`desktop/engine_runner.py`); compare button + error dialog + optional open output (`desktop/main_window.py`, `open_path_with_default_app`).
+
 ## Dependency sketch (simplified)
 
 ```text
