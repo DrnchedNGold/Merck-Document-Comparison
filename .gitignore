@@ -9,6 +9,10 @@
 .DS_Store
 Thumbs.db
 
+# Local virtualenvs
+.venv/
+.venv-ci/
+
 # Python cache artifacts
 __pycache__/
 *.egg-info/

@@ -13,7 +13,9 @@
 
 name: Golden regression
 
+# workflow_dispatch: Actions → Golden regression → Run workflow (manual retrigger).
 on:
+  workflow_dispatch:
   push:
     branches:
       - "**"
@@ -40,7 +42,7 @@ jobs:
       - name: Run golden_corpus-marked tests
         run: |
           set -o pipefail
-          python -m pytest -m golden_corpus -v --tb=short 2>&1 | tee golden-regression.log
+          python -m pytest -m golden_corpus -v --tb=short --durations=15 2>&1 | tee golden-regression.log
 
       - name: Upload golden regression log
         uses: actions/upload-artifact@v4
