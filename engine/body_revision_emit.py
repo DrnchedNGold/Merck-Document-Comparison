@@ -28,9 +28,14 @@ from typing import Union
 from .compare_keys import _normalize_text
 from .contracts import BodyIR, BodyParagraph, CompareConfig
 from .document_package import parse_docx_document_package
-from .docx_body_ingest import WORD_NAMESPACE, load_word_document_xml_root
+from .docx_body_ingest import WORD_NAMESPACE
 from .docx_output_package import write_docx_copy_with_part_replacements
-from .docx_package_parts import DOCUMENT_PART_PATH, discover_header_footer_part_paths
+from .docx_package_parts import (
+    DOCUMENT_PART_PATH,
+    discover_header_footer_part_paths,
+    discover_header_footer_part_paths_from_namelist,
+)
+from .ooxml_namespace import serialize_ooxml_part
 
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 NS = {"w": WORD_NAMESPACE}
@@ -322,7 +327,9 @@ def emit_docx_with_package_track_changes(
         date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     id_counter = [0]
-    root = load_word_document_xml_root(orig_path)
+    with zipfile.ZipFile(orig_path, "r") as zin:
+        raw_document_xml = zin.read(DOCUMENT_PART_PATH)
+    root = ET.fromstring(raw_document_xml)
     apply_body_track_changes_to_document_root(
         root,
         orig_pkg["document"],
@@ -333,18 +340,15 @@ def emit_docx_with_package_track_changes(
         id_counter=id_counter,
     )
 
-    ET.register_namespace("w", WORD_NAMESPACE)
-    ET.register_namespace("xml", XML_NAMESPACE)
-
     replacements: dict[str, bytes] = {
-        DOCUMENT_PART_PATH: ET.tostring(root, encoding="utf-8", xml_declaration=True),
+        DOCUMENT_PART_PATH: serialize_ooxml_part(root, raw_document_xml),
     }
 
     empty_ir: BodyIR = {"version": 1, "blocks": []}
     with zipfile.ZipFile(orig_path, "r") as zin:
-        for part in discover_header_footer_part_paths(orig_path):
-            raw = zin.read(part)
-            hf_root = ET.fromstring(raw)
+        for part in discover_header_footer_part_paths_from_namelist(zin.namelist()):
+            raw_hf = zin.read(part)
+            hf_root = ET.fromstring(raw_hf)
             o_ir = orig_pkg["header_footer"].get(part, empty_ir)
             r_ir = rev_pkg["header_footer"].get(part, empty_ir)
             apply_track_changes_to_hdr_ftr_root(
@@ -356,9 +360,7 @@ def emit_docx_with_package_track_changes(
                 date_iso=date_iso,
                 id_counter=id_counter,
             )
-            replacements[part] = ET.tostring(
-                hf_root, encoding="utf-8", xml_declaration=True
-            )
+            replacements[part] = serialize_ooxml_part(hf_root, raw_hf)
 
     write_docx_copy_with_part_replacements(orig_path, out_path, replacements)
 
