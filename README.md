@@ -143,6 +143,7 @@ Run the golden subset locally: `python -m pytest -m golden_corpus`.
 
 - [`docs/CLI-MERCK-COMPARE.md`](docs/CLI-MERCK-COMPARE.md) — `merck-compare` / `engine.compare_cli` user guide and exit codes  
 - [`docs/CAPTURE-WORD-COMPARE-SETTINGS.md`](docs/CAPTURE-WORD-COMPARE-SETTINGS.md) — Word baseline status + follow-ups  
+- [`docs/MDC-018-MOVE-DETECTION-V1.md`](docs/MDC-018-MOVE-DETECTION-V1.md) — v1 move detection decision (`w:del` + `w:ins` fallback, no `w:moveFrom`/`w:moveTo`)  
 - [`docs/PRE-PUSH-CHECKLIST.md`](docs/PRE-PUSH-CHECKLIST.md) — repo / GitHub hygiene  
 - [`docs/AI-PROMPTS-INDEX.md`](docs/AI-PROMPTS-INDEX.md) — all copy/paste AI prompts
 - [`docs/ADD-JIRA-TASKS-PROMPT.md`](docs/ADD-JIRA-TASKS-PROMPT.md) — generate Jira-ready task suggestions from the repo state

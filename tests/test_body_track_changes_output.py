@@ -326,3 +326,45 @@ def test_emit_preserves_w_p_pr(tmp_path: Path) -> None:
     p = root.find(".//w:p", NS)
     assert p is not None
     assert p.find("w:pPr", NS) is not None
+
+
+def test_emit_reordered_paragraph_uses_delete_insert_fallback_not_move_markup(
+    tmp_path: Path,
+) -> None:
+    """v1 fallback: reorders are emitted as del+ins, never w:moveFrom/w:moveTo."""
+    orig = _minimal_docx(
+        tmp_path,
+        "<w:p><w:r><w:t>A</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>B moved paragraph</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>C</w:t></w:r></w:p>",
+        "move_orig.docx",
+    )
+    rev = _minimal_docx(
+        tmp_path,
+        "<w:p><w:r><w:t>A</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>C</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>B moved paragraph</w:t></w:r></w:p>",
+        "move_rev.docx",
+    )
+    out = tmp_path / "move_out.docx"
+    emit_docx_with_body_track_changes(
+        orig,
+        rev,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        author="Fixture",
+        date_iso="2026-03-29T12:00:00Z",
+    )
+    root = load_word_document_xml_root(out)
+
+    # Explicit guard: current v1 does not emit move markup.
+    assert len(root.findall(".//w:moveFrom", NS)) == 0
+    assert len(root.findall(".//w:moveTo", NS)) == 0
+
+    # Reorder is represented as deletion at old position + insertion at new position.
+    del_chunks = [_collect_del_text(d) for d in root.findall(".//w:del", NS)]
+    ins_chunks = [_collect_t_text(i) for i in root.findall(".//w:ins", NS)]
+    del_flat = " ".join(del_chunks)
+    ins_flat = " ".join(ins_chunks)
+    assert "B" in del_flat and "moved" in del_flat and "paragraph" in del_flat
+    assert "B" in ins_flat and "moved" in ins_flat and "paragraph" in ins_flat

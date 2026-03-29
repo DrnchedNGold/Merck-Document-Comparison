@@ -23,7 +23,9 @@ Assumptions and limits
     - Fuzzy matching can mis-align two different but boilerplate-similar blocks;
       threshold is conservative.
     - No cross-paragraph move detection; reordering is expressed as delete +
-      insert alignment pairs, not as a semantic "move" op.
+      insert alignment pairs, not as a semantic "move" op. v1 emit intentionally
+      preserves this as ``w:del`` + ``w:ins`` fallback (no ``w:moveFrom`` /
+      ``w:moveTo`` markup).
     - Table blocks use the same signature string for fuzzy ratio when not equal.
 """
 
