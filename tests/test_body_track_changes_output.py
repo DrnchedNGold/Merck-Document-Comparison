@@ -76,6 +76,33 @@ def test_build_paragraph_track_change_delete_has_del_with_del_text() -> None:
     assert _collect_del_text(dels[0]) == " world"
 
 
+def test_build_paragraph_track_change_unrelated_phrase_not_single_del() -> None:
+    """Long unrelated edits must not collapse to one ``w:del`` for the whole tail."""
+    orig = _paragraph_block(
+        "The primary endpoint is overall response rate at week 12."
+    )
+    rev = _paragraph_block(
+        "The primary endpoint is progression-free survival at week 24."
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-03-28T00:00:00Z",
+    )
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    del_chunks = [_collect_del_text(d) for d in dels]
+    assert len(dels) >= 4
+    assert "overall" in del_chunks
+    assert "response" in del_chunks
+    assert "rate" in del_chunks
+    assert not any(
+        "overall response rate" in chunk and len(chunk) > 20 for chunk in del_chunks
+    )
+
+
 def test_build_paragraph_track_change_replace_has_del_then_ins() -> None:
     # Avoid shared trailing characters so SequenceMatcher emits one clean replace.
     orig = _paragraph_block("aaa bbb")
@@ -245,6 +272,43 @@ def test_emit_marks_deleted_paragraph_only_in_original(tmp_path: Path) -> None:
     dels = ps[1].findall(".//w:del", NS)
     assert len(dels) >= 1
     assert _collect_del_text(ps[1]) == "Remove me"
+
+
+def test_emit_zip_output_primary_endpoint_not_one_whole_paragraph_del(tmp_path: Path) -> None:
+    """Regression: extra paragraph in B must still align endpoint line for word-level XML."""
+    old_ep = "The primary endpoint is overall response rate at week 12."
+    new_ep = "The primary endpoint is progression-free survival at week 24."
+    paras_o = [
+        "The study will enroll 100 participants at three sites.",
+        "Inclusion criteria: adults aged 65 to 75 with confirmed diagnosis.",
+        old_ep,
+        "Contact: Dr. Smith (lead investigator).",
+    ]
+    paras_r = [
+        "The study will enroll 120 participants at four sites.",
+        "Inclusion criteria: adults aged 65 to 75 with confirmed diagnosis.",
+        new_ep,
+        "Contact: Dr. Jones (lead investigator).",
+        "Data monitoring will occur monthly.",
+    ]
+    body_o = "".join(
+        f"<w:p><w:r><w:t>{t}</w:t></w:r></w:p>" for t in paras_o
+    )
+    body_r = "".join(
+        f"<w:p><w:r><w:t>{t}</w:t></w:r></w:p>" for t in paras_r
+    )
+    orig = _minimal_docx(tmp_path, body_o, "demo_orig.docx")
+    rev = _minimal_docx(tmp_path, body_r, "demo_rev.docx")
+    out = tmp_path / "demo_out.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    ps = root.findall(".//w:body/w:p", NS)
+    assert len(ps) >= 3
+    p3 = ps[2]
+    dels = p3.findall(".//w:del", NS)
+    del_chunks = [_collect_del_text(d) for d in dels]
+    assert old_ep not in del_chunks
+    assert "overall" in del_chunks
 
 
 def test_emit_preserves_w_p_pr(tmp_path: Path) -> None:
