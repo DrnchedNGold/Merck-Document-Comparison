@@ -42,6 +42,21 @@ Optional `--config` points to a JSON `CompareConfig` (same keys as `engine.DEFAU
 
 The **desktop** app runs this CLI via subprocess (with `PYTHONPATH` set to the repo root) and can open the output file when the run succeeds.
 
+### Desktop GUI (Tk)
+
+From the repo root:
+
+```bash
+make desktop
+# or: ./scripts/run_desktop.sh
+```
+
+**macOS (Homebrew):** Plain `python3` from `brew install python@3.13` often has no `_tkinter`. Install Tk support, then use the launcher above (it prepends `$(brew --prefix python-tk@3.13)/libexec` to `PYTHONPATH` and runs `python3.13`):
+
+```bash
+brew install python-tk@3.13
+```
+
 ### Golden corpus regression harness (MDC-012)
 
 The repo includes a **config-driven harness** that runs the engine emit path on sponsor pairs under `sample-docs/` and prints **`w:ins` / `w:del` counts** per OOXML part, summarized as **document vs headers vs footers**.
