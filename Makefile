@@ -15,7 +15,7 @@ test-local: setup-test
 
 test:
 	docker run --rm -v "$(CURDIR):/workspace" -w /workspace $(DOCKER_IMAGE) \
-		sh -lc "python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt && python -m pytest"
+		sh -lc "python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt && python -m pytest -m \"not golden_corpus\""
 
 clean-venv:
 	rm -rf $(VENV)

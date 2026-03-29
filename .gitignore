@@ -24,3 +24,6 @@ tests/__pycache__root_old/
 
 # Local file testing (compare CLI / desktop output; entire directory untracked)
 tested_output/
+
+# Golden baseline refresh script output (.docx per pair)
+golden-corpus-output/

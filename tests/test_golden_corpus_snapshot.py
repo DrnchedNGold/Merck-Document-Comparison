@@ -57,7 +57,8 @@ def _sample_docs_available_for_all_pairs() -> bool:
 
 
 @pytest.mark.golden_corpus
-@pytest.mark.timeout(900)
+# Largest pair (IB editions) can exceed 15m on CI runners; keep under job limit (6h).
+@pytest.mark.timeout(3600)
 @pytest.mark.parametrize("pair_id", _GOLDEN_SNAPSHOT_PAIR_IDS)
 def test_golden_harness_emit_counts_match_committed_baseline(
     tmp_path: Path, pair_id: str
