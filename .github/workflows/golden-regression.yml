@@ -16,14 +16,18 @@ name: Golden regression
 # workflow_dispatch: Actions → Golden regression → Run workflow (manual retrigger).
 on:
   workflow_dispatch:
+  pull_request:
   push:
     branches:
-      - "**"
-  pull_request:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  golden-regression:
-    name: golden regression (sample-docs + harness)
+  golden-non-snapshot:
+    name: golden regression (non-snapshot)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,20 +37,64 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
 
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
-      - name: Run golden_corpus-marked tests
+      - name: Run golden_corpus tests excluding snapshot pairs
         run: |
           set -o pipefail
-          python -m pytest -m golden_corpus -v --tb=short --durations=15 2>&1 | tee golden-regression.log
+          python -m pytest -m golden_corpus -k "not test_golden_harness_emit_counts_match_committed_baseline" -v --tb=short --durations=15 2>&1 | tee golden-regression-non-snapshot.log
 
-      - name: Upload golden regression log
+      - name: Upload golden regression log (non-snapshot)
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: golden-regression-log
-          path: golden-regression.log
+          name: golden-regression-non-snapshot-log
+          path: golden-regression-non-snapshot.log
+
+  golden-snapshot:
+    name: golden regression (snapshot ${{ matrix.pair_id }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pair_id:
+          - email1-bladder
+          - email1-cervical
+          - email2-v940
+          - email3-protocol-1026
+          - email3-protocol-7902
+          - email3-ib-6-8
+          - email3-ib-10-11
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run snapshot regression for one pair
+        run: |
+          set -o pipefail
+          python -m pytest -m golden_corpus -k "test_golden_harness_emit_counts_match_committed_baseline and ${{ matrix.pair_id }}" -v --tb=short --durations=15 2>&1 | tee golden-regression-snapshot-${{ matrix.pair_id }}.log
+
+      - name: Upload golden regression log (snapshot)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-regression-snapshot-${{ matrix.pair_id }}-log
+          path: golden-regression-snapshot-${{ matrix.pair_id }}.log

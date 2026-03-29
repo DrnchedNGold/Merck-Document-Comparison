@@ -17,6 +17,7 @@ from desktop.desktop_state import (
     pick_save_path_via_dialog,
 )
 from desktop.engine_runner import open_path_with_default_app, run_compare_subprocess
+from desktop.error_ux import describe_compare_failure
 from desktop.profiles import (
     DEFAULT_WORD_COMPAT_PROFILE_NAME,
     ProfileFormatError,
@@ -288,9 +289,15 @@ class MerckDesktopApp(tk.Tk):
             if temp_config_path:
                 Path(temp_config_path).unlink(missing_ok=True)
         if proc.returncode != 0:
-            detail = (proc.stderr or "").strip() or (proc.stdout or "").strip()
-            msg = detail or f"Compare failed (exit code {proc.returncode})."
-            messagebox.showerror(self.title(), msg)
+            ux = describe_compare_failure(
+                returncode=int(proc.returncode),
+                stderr=proc.stderr,
+                stdout=proc.stdout,
+            )
+            messagebox.showerror(
+                self.title(),
+                f"{ux.headline}\n\n{ux.message}\n\nDetails:\n{ux.details}",
+            )
             return
         if messagebox.askyesno(
             self.title(),

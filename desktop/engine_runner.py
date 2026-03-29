@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def default_repo_root() -> Path:
@@ -55,7 +58,13 @@ def run_compare_subprocess(
         config_path=config_path,
         repo_root=repo_root,
     )
-    return subprocess.run(
+    logger.info(
+        "Starting engine compare: original=%s revised=%s output=%s",
+        Path(original).name,
+        Path(revised).name,
+        Path(output).name,
+    )
+    proc = subprocess.run(
         cmd,
         cwd=str(root),
         env=env,
@@ -64,6 +73,13 @@ def run_compare_subprocess(
         timeout=timeout_sec,
         check=False,
     )
+    if proc.returncode == 0:
+        logger.info("Engine compare succeeded.")
+    else:
+        stderr = (proc.stderr or "").strip()
+        snippet = stderr.splitlines()[0] if stderr else ""
+        logger.warning("Engine compare failed: exit_code=%s stderr_first_line=%r", proc.returncode, snippet)
+    return proc
 
 
 def open_path_with_default_app(path: Path) -> str | None:
