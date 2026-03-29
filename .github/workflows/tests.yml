@@ -4,7 +4,8 @@
 # - guardrails: block accidental __pycache__ / .pyc additions on changed files.
 # - pytest-matrix: default suite on Python 3.12 + 3.13 with coverage (excludes
 #   tests marked golden_corpus so PR signal stays fast).
-# - docker-make-test: full `pytest` inside Docker (`make test`).
+# - docker-make-test: `pytest -m "not golden_corpus"` inside Docker (`make test`);
+#   golden_corpus runs only in the Golden regression workflow.
 #
 # Golden / sample-docs regression runs in a separate workflow:
 #   `.github/workflows/golden-regression.yml`
@@ -12,6 +13,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - "**"

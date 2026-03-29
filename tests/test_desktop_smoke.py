@@ -13,6 +13,7 @@ from desktop.desktop_state import (
     compute_validation_state,
     normalize_dialog_path,
     pick_path_via_dialog,
+    pick_save_path_via_dialog,
     tk_display_environment_ready,
 )
 
@@ -74,6 +75,21 @@ def test_pick_path_via_dialog_cancel_returns_empty() -> None:
         return ""
 
     assert pick_path_via_dialog(cancel, title="t", filetypes=[]) == ""
+
+
+def test_pick_save_path_via_dialog() -> None:
+    def fake_save(**kwargs) -> str:
+        assert kwargs.get("defaultextension") == ".docx"
+        return "/tmp/out.docx"
+
+    assert (
+        pick_save_path_via_dialog(
+            fake_save,
+            title="Save",
+            filetypes=[("Word documents", "*.docx")],
+        )
+        == "/tmp/out.docx"
+    )
 
 
 def test_desktop_window_instantiates() -> None:

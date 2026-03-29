@@ -1,12 +1,22 @@
-"""Desktop main window: Original / Revised file pickers and Compare (stub)."""
+"""Desktop main window: Original / Revised pickers, engine CLI compare, open output (SCRUM-83)."""
 
 from __future__ import annotations
 
+import subprocess
 import tkinter as tk
 from collections.abc import Callable
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from desktop.desktop_state import FileDialogFn, compute_validation_state, pick_path_via_dialog
+from desktop.desktop_state import (
+    FileDialogFn,
+    compute_validation_state,
+    pick_path_via_dialog,
+    pick_save_path_via_dialog,
+)
+from desktop.engine_runner import open_path_with_default_app, run_compare_subprocess
+
+CompareRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class MerckDesktopApp(tk.Tk):
@@ -16,12 +26,16 @@ class MerckDesktopApp(tk.Tk):
         self,
         *,
         file_dialog: FileDialogFn | None = None,
+        save_dialog: FileDialogFn | None = None,
+        compare_runner: CompareRunner | None = None,
         title: str = "Merck Document Comparison",
     ) -> None:
         super().__init__()
         self.title(title)
         self.minsize(560, 220)
         self._file_dialog = file_dialog or filedialog.askopenfilename
+        self._save_dialog = save_dialog or filedialog.asksaveasfilename
+        self._compare_runner: CompareRunner = compare_runner or run_compare_subprocess
 
         self._original_path = tk.StringVar()
         self._revised_path = tk.StringVar()
@@ -52,6 +66,14 @@ class MerckDesktopApp(tk.Tk):
     def set_file_dialog(self, fn: FileDialogFn | None) -> None:
         """Replace the file picker (used by tests to inject a fake dialog). Pass None to restore default."""
         self._file_dialog = fn or filedialog.askopenfilename
+
+    def set_save_dialog(self, fn: FileDialogFn | None) -> None:
+        """Replace the save-as picker (tests). Pass None for default ``asksaveasfilename``."""
+        self._save_dialog = fn or filedialog.asksaveasfilename
+
+    def set_compare_runner(self, fn: CompareRunner | None) -> None:
+        """Replace the compare subprocess runner (tests). Pass None for default engine CLI."""
+        self._compare_runner = fn or run_compare_subprocess
 
     def _build_ui(self) -> None:
         pad = {"padx": 12, "pady": 6}
@@ -122,9 +144,36 @@ class MerckDesktopApp(tk.Tk):
         self._status_label.configure(foreground="#a50a0a" if state.status_is_error else "")
 
     def _on_compare(self) -> None:
-        # Stub until engine/CLI integration (separate task).
-        messagebox.showinfo(
-            self.title(),
-            "Compare is not connected to the comparison engine yet.\n\n"
-            "This action will run the full compare workflow in a later release.",
+        orig = self._original_path.get().strip()
+        rev = self._revised_path.get().strip()
+        out_path = pick_save_path_via_dialog(
+            self._save_dialog,
+            title="Save comparison output as…",
+            filetypes=[
+                ("Word documents", "*.docx"),
+                ("All files", "*.*"),
+            ],
+            defaultextension=".docx",
         )
+        if not out_path:
+            return
+        try:
+            proc = self._compare_runner(orig, rev, out_path)
+        except subprocess.TimeoutExpired:
+            messagebox.showerror(
+                self.title(),
+                "Compare timed out. Try smaller documents or contact support.",
+            )
+            return
+        if proc.returncode != 0:
+            detail = (proc.stderr or "").strip() or (proc.stdout or "").strip()
+            msg = detail or f"Compare failed (exit code {proc.returncode})."
+            messagebox.showerror(self.title(), msg)
+            return
+        if messagebox.askyesno(
+            self.title(),
+            "Comparison finished successfully.\n\nOpen the output document?",
+        ):
+            warn = open_path_with_default_app(Path(out_path))
+            if warn:
+                messagebox.showwarning(self.title(), warn)

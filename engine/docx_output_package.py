@@ -30,4 +30,8 @@ def write_docx_copy_with_part_replacements(
         for info in zin.infolist():
             name = _norm_zip_name(info.filename)
             payload = keys.get(name, zin.read(info.filename))
-            zout.writestr(info, payload)
+            # Fresh ZipInfo so CRC/size match replaced payloads (avoids Word repair).
+            zi = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
+            zi.compress_type = info.compress_type
+            zi.external_attr = info.external_attr
+            zout.writestr(zi, payload)

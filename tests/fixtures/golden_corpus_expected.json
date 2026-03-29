@@ -4,8 +4,8 @@
     "email1-bladder": {
       "by_part": {
         "word/document.xml": {
-          "del": 814,
-          "ins": 771
+          "del": 49,
+          "ins": 44
         },
         "word/footer1.xml": {
           "del": 0,
@@ -16,25 +16,25 @@
           "ins": 1
         },
         "word/header2.xml": {
-          "del": 1,
+          "del": 3,
           "ins": 3
         },
         "word/header3.xml": {
-          "del": 1,
+          "del": 4,
           "ins": 4
         }
       },
       "summary": {
         "document": {
-          "del": 814,
-          "ins": 771
+          "del": 49,
+          "ins": 44
         },
         "footers": {
           "del": 0,
           "ins": 0
         },
         "headers": {
-          "del": 3,
+          "del": 8,
           "ins": 8
         }
       }
@@ -42,38 +42,38 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 818,
-          "ins": 763
+          "del": 226,
+          "ins": 262
         },
         "word/footer1.xml": {
           "del": 0,
           "ins": 0
         },
         "word/header1.xml": {
-          "del": 1,
-          "ins": 2
+          "del": 2,
+          "ins": 4
         }
       },
       "summary": {
         "document": {
-          "del": 818,
-          "ins": 763
+          "del": 226,
+          "ins": 262
         },
         "footers": {
           "del": 0,
           "ins": 0
         },
         "headers": {
-          "del": 1,
-          "ins": 2
+          "del": 2,
+          "ins": 4
         }
       }
     },
     "email2-v940": {
       "by_part": {
         "word/document.xml": {
-          "del": 453,
-          "ins": 425
+          "del": 26,
+          "ins": 19
         },
         "word/footer1.xml": {
           "del": 0,
@@ -89,10 +89,10 @@
         },
         "word/header1.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header2.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header3.xml": {
@@ -102,31 +102,31 @@
       },
       "summary": {
         "document": {
-          "del": 453,
-          "ins": 425
+          "del": 26,
+          "ins": 19
         },
         "footers": {
           "del": 0,
           "ins": 0
         },
         "headers": {
-          "del": 0,
-          "ins": 1
+          "del": 2,
+          "ins": 2
         }
       }
     },
     "email3-ib-10-11": {
       "by_part": {
         "word/document.xml": {
-          "del": 9167,
-          "ins": 9117
+          "del": 2141,
+          "ins": 2117
         },
         "word/footer1.xml": {
           "del": 0,
-          "ins": 0
+          "ins": 2
         },
         "word/footer2.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/footer3.xml": {
@@ -139,90 +139,90 @@
         },
         "word/header1.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header10.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header11.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header12.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header13.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header14.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header15.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header16.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header17.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header18.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header19.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header2.xml": {
-          "del": 1,
+          "del": 2,
           "ins": 0
         },
         "word/header20.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header21.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header22.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header23.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header24.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header25.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header26.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header27.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header28.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header29.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header3.xml": {
@@ -230,43 +230,43 @@
           "ins": 0
         },
         "word/header30.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header31.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header32.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header33.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header34.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header35.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header36.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header37.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header38.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header39.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header4.xml": {
@@ -274,43 +274,43 @@
           "ins": 0
         },
         "word/header40.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header41.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header42.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header43.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header44.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header45.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header46.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header47.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header48.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header49.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header5.xml": {
@@ -318,27 +318,27 @@
           "ins": 0
         },
         "word/header50.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header51.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header52.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header53.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header54.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header55.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header6.xml": {
@@ -346,7 +346,7 @@
           "ins": 0
         },
         "word/header7.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header8.xml": {
@@ -354,34 +354,34 @@
           "ins": 0
         },
         "word/header9.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         }
       },
       "summary": {
         "document": {
-          "del": 9167,
-          "ins": 9117
+          "del": 2141,
+          "ins": 2117
         },
         "footers": {
-          "del": 0,
-          "ins": 0
+          "del": 2,
+          "ins": 2
         },
         "headers": {
-          "del": 1,
-          "ins": 1
+          "del": 98,
+          "ins": 2
         }
       }
     },
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 6855,
-          "ins": 6572
+          "del": 1450,
+          "ins": 1770
         },
         "word/footer1.xml": {
-          "del": 4,
-          "ins": 4
+          "del": 2,
+          "ins": 2
         },
         "word/footer10.xml": {
           "del": 0,
@@ -484,7 +484,7 @@
           "ins": 0
         },
         "word/header1.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header10.xml": {
@@ -492,125 +492,125 @@
           "ins": 1
         },
         "word/header11.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header12.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header13.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header14.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header15.xml": {
-          "del": 1,
+          "del": 2,
           "ins": 2
         },
         "word/header16.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header17.xml": {
-          "del": 1,
+          "del": 2,
           "ins": 2
         },
         "word/header18.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header19.xml": {
-          "del": 1,
+          "del": 2,
           "ins": 2
         },
         "word/header2.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header20.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header21.xml": {
-          "del": 1,
+          "del": 2,
           "ins": 2
         },
         "word/header22.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header23.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header24.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header25.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header26.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header27.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header28.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header29.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header3.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header4.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header5.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header6.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header7.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header8.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "word/header9.xml": {
-          "del": 1,
+          "del": 2,
           "ins": 2
         }
       },
       "summary": {
         "document": {
-          "del": 6855,
-          "ins": 6572
+          "del": 1450,
+          "ins": 1770
         },
         "footers": {
-          "del": 4,
-          "ins": 4
+          "del": 2,
+          "ins": 2
         },
         "headers": {
-          "del": 6,
+          "del": 41,
           "ins": 27
         }
       }
@@ -618,15 +618,15 @@
     "email3-protocol-1026": {
       "by_part": {
         "word/document.xml": {
-          "del": 11593,
-          "ins": 11075
+          "del": 896,
+          "ins": 929
         },
         "word/footer1.xml": {
           "del": 0,
           "ins": 1
         },
         "word/footer2.xml": {
-          "del": 0,
+          "del": 1,
           "ins": 0
         },
         "word/footer3.xml": {
@@ -635,10 +635,10 @@
         },
         "word/header1.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header2.xml": {
-          "del": 0,
+          "del": 2,
           "ins": 0
         },
         "word/header3.xml": {
@@ -648,24 +648,24 @@
       },
       "summary": {
         "document": {
-          "del": 11593,
-          "ins": 11075
+          "del": 896,
+          "ins": 929
         },
         "footers": {
-          "del": 0,
+          "del": 1,
           "ins": 1
         },
         "headers": {
-          "del": 0,
-          "ins": 1
+          "del": 2,
+          "ins": 2
         }
       }
     },
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 8828,
-          "ins": 8414
+          "del": 1152,
+          "ins": 1139
         },
         "word/footer1.xml": {
           "del": 0,
@@ -758,8 +758,8 @@
       },
       "summary": {
         "document": {
-          "del": 8828,
-          "ins": 8414
+          "del": 1152,
+          "ins": 1139
         },
         "footers": {
           "del": 0,

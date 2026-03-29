@@ -30,6 +30,35 @@ make test
 
 This runs tests in Docker with Python 3.12+.
 
+### Engine compare CLI (SCRUM-83)
+
+Compare two `.docx` files and write a new document with package-wide Track Changes (`python -m engine.compare_cli` or `merck-compare` after `pip install -e .`):
+
+```bash
+python -m engine.compare_cli --original path/to/original.docx --revised path/to/revised.docx --output path/to/out.docx
+```
+
+**Full documentation:** [`docs/CLI-MERCK-COMPARE.md`](docs/CLI-MERCK-COMPARE.md) (options, exit codes, JSON config, examples). **Man page (troff):** [`man/man1/merck-compare.1`](man/man1/merck-compare.1) — e.g. `man ./man/man1/merck-compare.1` from the repo root.
+
+Optional `--config` points to a JSON `CompareConfig` (same keys as `engine.DEFAULT_WORD_LIKE_COMPARE_CONFIG`). Exit codes: `0` success; `2` usage/config; `10` preflight; `11` document structure; `12` compare/emit or I/O. See `--help` for `--author` and `--date-iso`.
+
+The **desktop** app runs this CLI via subprocess (with `PYTHONPATH` set to the repo root) and can open the output file when the run succeeds.
+
+### Desktop GUI (Tk)
+
+From the repo root:
+
+```bash
+make desktop
+# or: ./scripts/run_desktop.sh
+```
+
+**macOS (Homebrew):** Plain `python3` from `brew install python@3.13` often has no `_tkinter`. Install Tk support, then use the launcher above (it prepends `$(brew --prefix python-tk@3.13)/libexec` to `PYTHONPATH` and runs `python3.13`):
+
+```bash
+brew install python-tk@3.13
+```
+
 ### Golden corpus regression harness (MDC-012)
 
 The repo includes a **config-driven harness** that runs the engine emit path on sponsor pairs under `sample-docs/` and prints **`w:ins` / `w:del` counts** per OOXML part, summarized as **document vs headers vs footers**.
@@ -91,6 +120,7 @@ Run the golden subset locally: `python -m pytest -m golden_corpus`.
 
 ## More docs
 
+- [`docs/CLI-MERCK-COMPARE.md`](docs/CLI-MERCK-COMPARE.md) — `merck-compare` / `engine.compare_cli` user guide and exit codes  
 - [`docs/CAPTURE-WORD-COMPARE-SETTINGS.md`](docs/CAPTURE-WORD-COMPARE-SETTINGS.md) — Word baseline status + follow-ups  
 - [`docs/PRE-PUSH-CHECKLIST.md`](docs/PRE-PUSH-CHECKLIST.md) — repo / GitHub hygiene  
 - [`docs/AI-PROMPTS-INDEX.md`](docs/AI-PROMPTS-INDEX.md) — all copy/paste AI prompts

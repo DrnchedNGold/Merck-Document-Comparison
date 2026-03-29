@@ -9,13 +9,21 @@
 .DS_Store
 Thumbs.db
 
-# Golden harness CLI default output (SCRUM-68)
-golden-corpus-output/
+# Local virtualenvs
+.venv/
+.venv-ci/
 
 # Python cache artifacts
 __pycache__/
+*.egg-info/
 *.py[cod]
 tests/__pycache__root_old/
 
-# Local editor rules (optional)
+
 .cursor/
+
+# Local file testing (compare CLI / desktop output; entire directory untracked)
+tested_output/
+
+# Golden baseline refresh script output (.docx per pair)
+golden-corpus-output/

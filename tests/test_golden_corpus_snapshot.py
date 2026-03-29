@@ -18,6 +18,18 @@ from engine.corpus_harness import (
 # Must match scripts/refresh_golden_corpus_baseline.py --date-iso default.
 _SNAPSHOT_DATE_ISO = "2026-03-27T12:00:00Z"
 
+# One pytest per pair so CI logs show progress (a single test that runs all pairs
+# looks “stuck” for many minutes on large protocols).
+_GOLDEN_SNAPSHOT_PAIR_IDS: tuple[str, ...] = (
+    "email1-bladder",
+    "email1-cervical",
+    "email2-v940",
+    "email3-protocol-1026",
+    "email3-protocol-7902",
+    "email3-ib-6-8",
+    "email3-ib-10-11",
+)
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -45,19 +57,26 @@ def _sample_docs_available_for_all_pairs() -> bool:
 
 
 @pytest.mark.golden_corpus
-def test_golden_harness_emit_counts_match_committed_baseline(tmp_path: Path) -> None:
+# Largest pair (IB editions) can exceed 15m on CI runners; keep under job limit (6h).
+@pytest.mark.timeout(3600)
+@pytest.mark.parametrize("pair_id", _GOLDEN_SNAPSHOT_PAIR_IDS)
+def test_golden_harness_emit_counts_match_committed_baseline(
+    tmp_path: Path, pair_id: str
+) -> None:
     root = _repo_root()
     if not _sample_docs_available_for_all_pairs():
         pytest.skip("Full sample-docs corpus not present; snapshot regression runs in CI with committed binaries.")
 
     pairs = load_golden_pairs(root / "tests/fixtures/golden_corpus_pairs.json")
+    by_id = {p.id: p for p in pairs}
+    assert set(by_id.keys()) == set(_GOLDEN_SNAPSHOT_PAIR_IDS)
     baseline = load_golden_expected_baseline(
         root / "tests/fixtures/golden_corpus_expected.json"
     )
 
     batch = run_configured_pairs(
         root,
-        pairs,
+        [by_id[pair_id]],
         tmp_path / "golden-snapshot-out",
         DEFAULT_WORD_LIKE_COMPARE_CONFIG,
         author="GoldenCorpusBaselineRefresh",
@@ -65,8 +84,8 @@ def test_golden_harness_emit_counts_match_committed_baseline(tmp_path: Path) -> 
     )
     assert batch.all_ok(), [r.error for r in batch.results if not r.ok]
 
-    for r in batch.results:
-        assert r.report is not None
-        expected = baseline["pairs"][r.pair_id]
-        mismatches = list(iter_snapshot_mismatches(r.report, expected))
-        assert not mismatches, f"{r.pair_id}:\n" + "\n".join(mismatches)
+    r = batch.results[0]
+    assert r.report is not None
+    expected = baseline["pairs"][r.pair_id]
+    mismatches = list(iter_snapshot_mismatches(r.report, expected))
+    assert not mismatches, f"{r.pair_id}:\n" + "\n".join(mismatches)

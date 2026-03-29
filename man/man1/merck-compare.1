@@ -1,0 +1,71 @@
+.TH MERCK-COMPARE 1 "March 2026" "Merck Document Comparison" "User Commands"
+.SH NAME
+merck-compare \- compare two Word .docx files and emit Track Changes markup
+.SH SYNOPSIS
+.B merck-compare
+\fB\-\-original\fR \fIPATH\fR \fB\-\-revised\fR \fIPATH\fR \fB\-\-output\fR \fIPATH\fR
+.br
+.RS
+[\fB\-\-config\fR \fIPATH\fR] [\fB\-\-author\fR \fINAME\fR] [\fB\-\-date\-iso\fR \fIISO8601\fR]
+.RE
+.PP
+Alternative invocation:
+.B python \-m engine.compare_cli
+with the same arguments (from repository root).
+.SH DESCRIPTION
+Compare two Office Open XML Word documents (\fB.docx\fR) and write a new document containing
+revision markup (insertions/deletions) produced by the Merck Document Comparison engine.
+.PP
+The program prints human-readable error messages to standard error on failure; success is
+indicated only by exit status \fB0\fR and the presence of the output file.
+.SH OPTIONS
+.TP
+.BR \-\-original " " PATH
+Path to the original (baseline) \fB.docx\fR file. Required.
+.TP
+.BR \-\-revised " " PATH
+Path to the revised \fB.docx\fR file. Required.
+.TP
+.BR \-\-output " " PATH
+Path for the generated \fB.docx\fR. Parent directories are created if necessary. Required.
+.TP
+.BR \-\-config " " PATH
+Optional JSON file defining compare options (\fBignore_case\fR, \fBignore_whitespace\fR,
+\fBignore_formatting\fR, \fBdetect_moves\fR \- all booleans). Invalid JSON or validation
+errors cause exit status \fB2\fR.
+.TP
+.BR \-\-author " " NAME
+Author string stored on revision elements (default: \fBMerckDocCompare\fR).
+.TP
+.BR \-\-date\-iso " " ISO8601
+Optional fixed revision timestamp for reproducible output, e.g. \fB2026\-03\-28T12:00:00Z\fR.
+.SH "EXIT STATUS"
+.TP
+.B 0
+Success.
+.TP
+.B 2
+Invalid usage, unreadable config, bad JSON, or compare configuration validation failure.
+.TP
+.B 10
+Preflight rejection (file type, archive issues, existing track changes, comments, etc.).
+.TP
+.B 11
+Document or package structure problem (e.g. missing \fBword/document.xml\fR, XML parse error).
+.TP
+.B 12
+Compare/emit failure or I/O error during generation.
+.SH FILES
+Input and output paths are user-specified. Optional configuration is a JSON object; see
+.I docs/CLI\-MERCK\-COMPARE.md
+in the repository for a full description.
+.SH BUGS
+Report issues in the project issue tracker per team workflow.
+.SH "SEE ALSO"
+Full user guide:
+.I docs/CLI\-MERCK\-COMPARE.md
+\&.
+.PP
+Related:
+.B python scripts/run_golden_corpus.py
+(regression harness; separate from this CLI).

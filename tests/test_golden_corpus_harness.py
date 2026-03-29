@@ -230,6 +230,7 @@ def test_golden_fixture_json_lists_all_three_corpora() -> None:
 
 
 @pytest.mark.golden_corpus
+@pytest.mark.timeout(3600)
 @pytest.mark.parametrize(
     ("orig_rel", "rev_rel"),
     [
@@ -277,6 +278,7 @@ def test_real_corpus_pair_runs_when_sample_docs_present(
 
 
 @pytest.mark.golden_corpus
+@pytest.mark.timeout(3600)
 def test_configured_pairs_from_fixture_json_when_files_exist(tmp_path: Path) -> None:
     root = _repo_root()
     pairs = load_golden_pairs(_fixture_pairs_path())

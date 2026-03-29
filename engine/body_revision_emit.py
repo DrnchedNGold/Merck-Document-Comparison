@@ -1,9 +1,18 @@
 """
-Emit Word Track Changes markup (w:ins / w:del) for matched body paragraphs (SCRUM-59).
+Emit Word Track Changes markup (w:ins / w:del) for body paragraphs (SCRUM-59).
 
-Uses the same concatenated-run text and :mod:`difflib` segmentation as
-:func:`engine.inline_run_diff.inline_diff_single_paragraph` so output aligns with
-inline ``DiffOp`` semantics.
+Paragraphs are aligned with :func:`engine.paragraph_alignment.align_paragraphs` (LCS
+on block signatures) so **new paragraphs only in the revised document** become
+inserted ``w:p`` elements with ``w:ins``, and paragraphs only in the original become
+full-paragraph ``w:del``. Matched paragraphs use **word/whitespace** tokens (``\\S+`` / ``\\s+``). When a
+word-level ``replace`` covers multiple tokens, we **sub-diff again at word level**
+on that span so phrases like ``overall response rate … 12`` vs ``progression-free
+survival … 24`` become separate ``w:del`` / ``w:ins`` markers per word (with shared
+fragments like ``at week`` left as normal text). If a nested replace still has
+multiple words on a side, we diff **word tokens** (``\\S+``) only—never a
+character-level matcher on unrelated phrases, which would align stray letters
+and merge the whole clause into one deletion.
+Inline ``DiffOp`` generation remains character-based in :mod:`engine.inline_run_diff`.
 
 Package-wide emit (SCRUM-64 / MDC-011): ``word/document.xml`` plus each
 ``word/header*.xml`` / ``word/footer*.xml`` present in the original package,
@@ -19,6 +28,7 @@ and extend markup in a dedicated parity task rather than guessing attributes her
 from __future__ import annotations
 
 import difflib
+import re
 from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import zipfile
@@ -28,9 +38,15 @@ from typing import Union
 from .compare_keys import _normalize_text
 from .contracts import BodyIR, BodyParagraph, CompareConfig
 from .document_package import parse_docx_document_package
-from .docx_body_ingest import WORD_NAMESPACE, load_word_document_xml_root
+from .paragraph_alignment import ParagraphAlignment, align_paragraphs
+from .docx_body_ingest import WORD_NAMESPACE
 from .docx_output_package import write_docx_copy_with_part_replacements
-from .docx_package_parts import DOCUMENT_PART_PATH, discover_header_footer_part_paths
+from .docx_package_parts import (
+    DOCUMENT_PART_PATH,
+    discover_header_footer_part_paths,
+    discover_header_footer_part_paths_from_namelist,
+)
+from .ooxml_namespace import serialize_ooxml_part
 
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 NS = {"w": WORD_NAMESPACE}
@@ -44,6 +60,11 @@ def _concat_paragraph_text(paragraph: BodyParagraph, config: CompareConfig) -> s
     return "".join(
         _normalize_text(str(run.get("text", "")), config) for run in paragraph.get("runs", [])
     )
+
+
+def _word_level_tokens(text: str) -> list[str]:
+    """Split into runs of non-whitespace (words, numbers, punctuation clumps) and whitespace."""
+    return re.findall(r"\S+|\s+", text)
 
 
 def _structural_block_elements(container: ET.Element) -> list[ET.Element]:
@@ -60,7 +81,10 @@ def _structural_block_elements(container: ET.Element) -> list[ET.Element]:
 def _paragraph_needs_revision(orig: BodyParagraph, rev: BodyParagraph, config: CompareConfig) -> bool:
     o = _concat_paragraph_text(orig, config)
     r = _concat_paragraph_text(rev, config)
-    for tag, *_ in difflib.SequenceMatcher(None, o, r).get_opcodes():
+    if o == r:
+        return False
+    ot, rt = _word_level_tokens(o), _word_level_tokens(r)
+    for tag, *_ in difflib.SequenceMatcher(None, ot, rt, autojunk=False).get_opcodes():
         if tag != "equal":
             return True
     return False
@@ -110,6 +134,147 @@ def _w_ins_segment(text: str, ins_id: str, author: str, date_iso: str) -> ET.Ele
     return ins_el
 
 
+def _replace_span_is_multi_token(before: str, after: str) -> bool:
+    """True when the replaced text spans more than one word token or includes spaces."""
+    if not before and not after:
+        return False
+    for s in (before, after):
+        if re.search(r"\s", s):
+            return True
+        if len(re.findall(r"\S+", s)) > 1:
+            return True
+    return False
+
+
+def _emit_word_only_track_change_fragment(
+    before: str,
+    after: str,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element]:
+    """
+    Diff on ``\\S+`` tokens only (no whitespace runs).
+
+    Used when a word-token replace span still has multiple words on a side but
+    no reliable character alignment (unrelated phrases). ``equal`` runs join
+    words with a single ASCII space (acceptable for clinical prose).
+    """
+
+    out: list[ET.Element] = []
+    lead_b = re.match(r"^\s+", before)
+    if lead_b:
+        out.append(_w_run_with_t(lead_b.group(0)))
+    trail_b = re.search(r"\s+$", before)
+    trail_b_s = trail_b.group(0) if trail_b else ""
+
+    wb = re.findall(r"\S+", before)
+    wa = re.findall(r"\S+", after)
+    if not wb and not wa:
+        if trail_b_s:
+            out.append(_w_run_with_t(trail_b_s))
+        return out
+
+    sm = difflib.SequenceMatcher(None, wb, wa, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            if i1 < i2:
+                out.append(_w_run_with_t(" ".join(wb[i1:i2])))
+        elif tag == "delete":
+            for w in wb[i1:i2]:
+                out.append(_w_del_segment(w, _next_id(id_counter), author, date_iso))
+        elif tag == "insert":
+            for w in wa[j1:j2]:
+                out.append(_w_ins_segment(w, _next_id(id_counter), author, date_iso))
+        elif tag == "replace":
+            slice_b, slice_a = wb[i1:i2], wa[j1:j2]
+            nb, na = len(slice_b), len(slice_a)
+            for k in range(min(nb, na)):
+                out.append(
+                    _w_del_segment(slice_b[k], _next_id(id_counter), author, date_iso)
+                )
+                out.append(
+                    _w_ins_segment(slice_a[k], _next_id(id_counter), author, date_iso)
+                )
+            for k in range(min(nb, na), nb):
+                out.append(
+                    _w_del_segment(slice_b[k], _next_id(id_counter), author, date_iso)
+                )
+            for k in range(min(nb, na), na):
+                out.append(
+                    _w_ins_segment(slice_a[k], _next_id(id_counter), author, date_iso)
+                )
+    if trail_b_s:
+        out.append(_w_run_with_t(trail_b_s))
+    return out
+
+
+def _emit_word_token_track_change_fragment(
+    before: str,
+    after: str,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element]:
+    """
+    Word-token diff on a substring (typically the ``before``/``after`` of a
+    multi-token outer ``replace``).
+
+    Character-level diff on long unrelated phrases often yields a single huge
+    ``replace`` opcode → one ``w:del`` for the whole clause. Re-running LCS on
+    tokens pulls out shared pieces (e.g. `` at week ``) and splits outgoing words
+    into separate revision markers.
+    """
+
+    out: list[ET.Element] = []
+    if not before and not after:
+        return out
+    if not before:
+        if after:
+            out.append(_w_ins_segment(after, _next_id(id_counter), author, date_iso))
+        return out
+    if not after:
+        out.append(_w_del_segment(before, _next_id(id_counter), author, date_iso))
+        return out
+
+    ot, rt = _word_level_tokens(before), _word_level_tokens(after)
+    sm = difflib.SequenceMatcher(None, ot, rt, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            chunk = "".join(ot[i1:i2])
+            if chunk:
+                out.append(_w_run_with_t(chunk))
+        elif tag == "delete":
+            chunk = "".join(ot[i1:i2])
+            if chunk:
+                out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
+        elif tag == "insert":
+            chunk = "".join(rt[j1:j2])
+            if chunk:
+                out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
+        elif tag == "replace":
+            b = "".join(ot[i1:i2])
+            a = "".join(rt[j1:j2])
+            if not _replace_span_is_multi_token(b, a):
+                if b:
+                    out.append(_w_del_segment(b, _next_id(id_counter), author, date_iso))
+                if a:
+                    out.append(_w_ins_segment(a, _next_id(id_counter), author, date_iso))
+            else:
+                out.extend(
+                    _emit_word_only_track_change_fragment(
+                        b,
+                        a,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                )
+    return out
+
+
 def build_paragraph_track_change_elements(
     original: BodyParagraph,
     revised: BodyParagraph,
@@ -123,29 +288,42 @@ def build_paragraph_track_change_elements(
 
     orig_text = _concat_paragraph_text(original, config)
     rev_text = _concat_paragraph_text(revised, config)
-    matcher = difflib.SequenceMatcher(None, orig_text, rev_text)
+    orig_tokens = _word_level_tokens(orig_text)
+    rev_tokens = _word_level_tokens(rev_text)
+    matcher = difflib.SequenceMatcher(None, orig_tokens, rev_tokens, autojunk=False)
     out: list[ET.Element] = []
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
-            chunk = orig_text[i1:i2]
+            chunk = "".join(orig_tokens[i1:i2])
             if chunk:
                 out.append(_w_run_with_t(chunk))
         elif tag == "delete":
-            chunk = orig_text[i1:i2]
+            chunk = "".join(orig_tokens[i1:i2])
             if chunk:
                 out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "insert":
-            chunk = rev_text[j1:j2]
+            chunk = "".join(rev_tokens[j1:j2])
             if chunk:
                 out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "replace":
-            before = orig_text[i1:i2]
-            after = rev_text[j1:j2]
-            if before:
-                out.append(_w_del_segment(before, _next_id(id_counter), author, date_iso))
-            if after:
-                out.append(_w_ins_segment(after, _next_id(id_counter), author, date_iso))
+            before = "".join(orig_tokens[i1:i2])
+            after = "".join(rev_tokens[j1:j2])
+            if _replace_span_is_multi_token(before, after):
+                out.extend(
+                    _emit_word_token_track_change_fragment(
+                        before,
+                        after,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                )
+            else:
+                if before:
+                    out.append(_w_del_segment(before, _next_id(id_counter), author, date_iso))
+                if after:
+                    out.append(_w_ins_segment(after, _next_id(id_counter), author, date_iso))
 
     return out
 
@@ -159,31 +337,92 @@ def _apply_track_changes_to_structural_container(
     date_iso: str,
     id_counter: list[int],
 ) -> None:
-    """Mutate ``container`` in place: revision markup on index-paired paragraphs."""
+    """Mutate ``container`` in place using LCS paragraph alignment (inserts, deletes, in-place edits)."""
 
     block_els = _structural_block_elements(container)
+    ob = original_ir.get("blocks", [])
+    rb = revised_ir.get("blocks", [])
 
-    for oi, oblock, rblock in _positional_paragraph_pairs(original_ir, revised_ir):
-        if oi < 0 or oi >= len(block_els):
-            continue
-        p_el = block_els[oi]
-        if _local_name(p_el.tag) != "p":
-            continue
+    # Always run LCS alignment when A/B block counts differ. A legacy branch used to
+    # return early with index-only pairing when ``len(block_els) != len(ob)``, which
+    # skipped :func:`align_paragraphs` entirely—so real docs (extra paragraph in B,
+    # slightly different OOXML shape) never got fuzzy-matched paragraphs and showed
+    # whole-paragraph delete/insert instead of in-place word revisions.
 
-        orig_para: BodyParagraph = oblock  # type: ignore[assignment]
-        rev_para: BodyParagraph = rblock  # type: ignore[assignment]
-        if not _paragraph_needs_revision(orig_para, rev_para, config):
-            continue
+    # Same block count: pair by index so in-place text edits (e.g. ``Hi`` → ``Hi there``)
+    # stay one paragraph with word-level ins/del. When counts differ, LCS finds inserted /
+    # deleted paragraphs (lines only in A or only in B).
+    if len(ob) == len(rb):
+        alignment = [ParagraphAlignment(i, i) for i in range(len(ob))]
+    else:
+        alignment = align_paragraphs(original_ir, revised_ir, config)
+    empty_rev = _empty_body_paragraph()
 
-        new_kids = build_paragraph_track_change_elements(
-            orig_para,
-            rev_para,
-            config,
-            id_counter=id_counter,
-            author=author,
-            date_iso=date_iso,
-        )
-        _replace_p_content_preserving_p_pr(p_el, new_kids)
+    for step_i, al in enumerate(alignment):
+        oi = al.original_paragraph_index
+        rj = al.revised_paragraph_index
+
+        if oi is not None and rj is not None:
+            if oi >= len(block_els):
+                continue
+            oblock, rblock = ob[oi], rb[rj]
+            el = block_els[oi]
+            if oblock.get("type") != "paragraph" or rblock.get("type") != "paragraph":
+                continue
+            if _local_name(el.tag) != "p":
+                continue
+            orig_para: BodyParagraph = oblock  # type: ignore[assignment]
+            rev_para: BodyParagraph = rblock  # type: ignore[assignment]
+            if not _paragraph_needs_revision(orig_para, rev_para, config):
+                continue
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            _replace_p_content_preserving_p_pr(el, new_kids)
+        elif oi is not None and rj is None:
+            if oi >= len(block_els):
+                continue
+            oblock = ob[oi]
+            el = block_els[oi]
+            if oblock.get("type") != "paragraph":
+                continue
+            if _local_name(el.tag) != "p":
+                continue
+            orig_para = oblock  # type: ignore[assignment]
+            if not _paragraph_needs_revision(orig_para, empty_rev, config):
+                continue
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                empty_rev,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            _replace_p_content_preserving_p_pr(el, new_kids)
+        elif oi is None and rj is not None:
+            rblock = rb[rj]
+            if rblock.get("type") != "paragraph":
+                continue
+            rev_para = rblock  # type: ignore[assignment]
+            if not _paragraph_needs_revision(empty_rev, rev_para, config):
+                continue
+            idx = _body_insert_index_before_next_orig_block(
+                container, alignment, step_i, block_els
+            )
+            new_p = _new_w_p_from_full_paragraph_insert(
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            container.insert(idx, new_p)
 
 
 def _replace_p_content_preserving_p_pr(p_el: ET.Element, new_children: list[ET.Element]) -> None:
@@ -199,28 +438,55 @@ def _replace_p_content_preserving_p_pr(p_el: ET.Element, new_children: list[ET.E
         p_el.insert(insert_at + i, node)
 
 
-def _positional_paragraph_pairs(
-    original_ir: BodyIR, revised_ir: BodyIR
-) -> list[tuple[int, BodyParagraph, BodyParagraph]]:
-    """
-    Pair top-level paragraph blocks by **index** (0 with 0, 1 with 1, …) up to
-    the shorter body length.
+def _empty_body_paragraph() -> BodyParagraph:
+    return {"type": "paragraph", "id": "_", "runs": []}
 
-    Signature-based :func:`engine.paragraph_alignment.align_paragraphs` only links
-    paragraphs whose compare-key signatures match, so edited text in the “same”
-    paragraph slot would never pair. Positional pairing matches the trivial
-    body-only compare case (same block order, text edits in place).
-    """
 
-    ob = original_ir.get("blocks", [])
-    rb = revised_ir.get("blocks", [])
-    n = min(len(ob), len(rb))
-    out: list[tuple[int, BodyParagraph, BodyParagraph]] = []
-    for i in range(n):
-        o_blk, r_blk = ob[i], rb[i]
-        if o_blk.get("type") == "paragraph" and r_blk.get("type") == "paragraph":
-            out.append((i, o_blk, r_blk))  # type: ignore[arg-type]
-    return out
+def _body_insert_index_before_next_orig_block(
+    container: ET.Element,
+    alignment: list,
+    step_index: int,
+    block_els: list[ET.Element],
+) -> int:
+    """DOM index in ``container`` to insert a new block before the next original block (or before ``sectPr``)."""
+
+    children = list(container)
+    next_oi: int | None = None
+    for k in range(step_index + 1, len(alignment)):
+        oi = alignment[k].original_paragraph_index
+        if oi is not None:
+            next_oi = oi
+            break
+    if next_oi is not None and next_oi < len(block_els):
+        anchor = block_els[next_oi]
+        return children.index(anchor)
+    sect = container.find("w:sectPr", NS)
+    if sect is not None:
+        return children.index(sect)
+    return len(children)
+
+
+def _new_w_p_from_full_paragraph_insert(
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> ET.Element:
+    """A ``w:p`` whose content is Track Changes for text that exists only in the revised document."""
+    kids = build_paragraph_track_change_elements(
+        _empty_body_paragraph(),
+        rev_para,
+        config,
+        id_counter=id_counter,
+        author=author,
+        date_iso=date_iso,
+    )
+    p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
+    for node in kids:
+        p_el.append(node)
+    return p_el
 
 
 def apply_body_track_changes_to_document_root(
@@ -234,9 +500,8 @@ def apply_body_track_changes_to_document_root(
     id_counter: list[int] | None = None,
 ) -> None:
     """
-    Mutate ``document_root`` (``w:document``): for each index-paired paragraph
-    block that differs, replace non-``w:pPr`` content under the corresponding
-    ``w:p`` with Track Changes children.
+    Mutate ``document_root`` (``w:document``): align body blocks to the revised IR,
+    then apply Track Changes (including inserted ``w:p`` / full-paragraph deletes).
 
     When ``id_counter`` is omitted, a fresh counter is used for this part only.
     Pass a shared list for package-wide unique ``w:id`` values (MDC-011).
@@ -272,8 +537,8 @@ def apply_track_changes_to_hdr_ftr_root(
     id_counter: list[int] | None = None,
 ) -> None:
     """
-    Mutate a ``w:hdr`` or ``w:ftr`` root in place using the same positional
-    paragraph pairing as the main document body.
+    Mutate a ``w:hdr`` or ``w:ftr`` root in place using the same LCS block alignment
+    as the main document body.
     """
 
     ln = _local_name(hdr_or_ftr_root.tag)
@@ -322,7 +587,9 @@ def emit_docx_with_package_track_changes(
         date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     id_counter = [0]
-    root = load_word_document_xml_root(orig_path)
+    with zipfile.ZipFile(orig_path, "r") as zin:
+        raw_document_xml = zin.read(DOCUMENT_PART_PATH)
+    root = ET.fromstring(raw_document_xml)
     apply_body_track_changes_to_document_root(
         root,
         orig_pkg["document"],
@@ -333,18 +600,15 @@ def emit_docx_with_package_track_changes(
         id_counter=id_counter,
     )
 
-    ET.register_namespace("w", WORD_NAMESPACE)
-    ET.register_namespace("xml", XML_NAMESPACE)
-
     replacements: dict[str, bytes] = {
-        DOCUMENT_PART_PATH: ET.tostring(root, encoding="utf-8", xml_declaration=True),
+        DOCUMENT_PART_PATH: serialize_ooxml_part(root, raw_document_xml),
     }
 
     empty_ir: BodyIR = {"version": 1, "blocks": []}
     with zipfile.ZipFile(orig_path, "r") as zin:
-        for part in discover_header_footer_part_paths(orig_path):
-            raw = zin.read(part)
-            hf_root = ET.fromstring(raw)
+        for part in discover_header_footer_part_paths_from_namelist(zin.namelist()):
+            raw_hf = zin.read(part)
+            hf_root = ET.fromstring(raw_hf)
             o_ir = orig_pkg["header_footer"].get(part, empty_ir)
             r_ir = rev_pkg["header_footer"].get(part, empty_ir)
             apply_track_changes_to_hdr_ftr_root(
@@ -356,9 +620,7 @@ def emit_docx_with_package_track_changes(
                 date_iso=date_iso,
                 id_counter=id_counter,
             )
-            replacements[part] = ET.tostring(
-                hf_root, encoding="utf-8", xml_declaration=True
-            )
+            replacements[part] = serialize_ooxml_part(hf_root, raw_hf)
 
     write_docx_copy_with_part_replacements(orig_path, out_path, replacements)
 
