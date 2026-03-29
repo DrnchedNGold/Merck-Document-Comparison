@@ -75,6 +75,8 @@ Invalid JSON, wrong shape, or failed validation exits with code **2** and prints
 }
 ```
 
+This JSON is also the default **Word-compatible** settings profile used by the desktop UI when no custom profile is loaded.
+
 ```bash
 merck-compare --original a.docx --revised b.docx --output c.docx --config compare-config.json
 ```
