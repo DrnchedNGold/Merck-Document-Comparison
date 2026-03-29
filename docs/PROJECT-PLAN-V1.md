@@ -67,15 +67,15 @@ Other Sprint 4 catalog items (MDC-011 revision metadata / MDC-013 CI) are implem
 
 ## Sprint 5 — Desktop MVP + wiring (Phase 5)
 
-Verification note: **MDC-014** (desktop shell) and **MDC-015** (engine CLI + desktop invoke + open output) are implemented and covered by tests below. **MDC-016–018** remain per catalog (settings UI, richer error UX, stretch move detection) unless listed as done in a future audit.
+Verification note: `docs/SCRUM-102-SPRINT5-AUDIT.md` (SCRUM-102) confirms Sprint 5 catalog acceptance for MDC-014–018 against the repo.
 
 | Catalog | Location | Tests |
 |--------|----------|--------|
 | MDC-014 | `desktop/main_window.py`, `desktop/desktop_state.py`, `desktop/__main__.py` | `tests/test_desktop_smoke.py` (validation + optional Tk smoke); `desktop/` pickers wired without stub-only compare |
 | MDC-015 | `engine/compare_cli.py` (also `merck-compare` in `pyproject.toml`), `desktop/engine_runner.py` (`python -m engine.compare_cli`, optional `--config`), `desktop/main_window.py` (subprocess compare, stderr on failure, **Open output** via OS default app); user docs `docs/CLI-MERCK-COMPARE.md`, man page `man/man1/merck-compare.1` | `tests/test_compare_cli.py`, `tests/test_desktop_engine_runner.py` |
-| MDC-016 | *Backlog:* profile JSON in UI driving `--config` — not yet a full settings screen | — |
-| MDC-017 | *Partial:* desktop shows CLI **stderr** on failure; dedicated exit-code → message table in README is catalog follow-up | — |
-| MDC-018 | *Stretch / backlog* | — |
+| MDC-016 | `desktop/profiles.py` (profile JSON load/save), `desktop/main_window.py` (profile toggles + Load/Save UI) | `tests/test_desktop_profiles.py` |
+| MDC-017 | `desktop/error_ux.py` (exit code/stderr mapping), `desktop/main_window.py` (friendly failure dialog + Details), `desktop/engine_runner.py` (logging), `README.md` troubleshooting section | `tests/test_desktop_error_ux.py`, `tests/test_desktop_engine_runner.py` |
+| MDC-018 | `docs/MDC-018-MOVE-DETECTION-V1.md` (documented fallback decision); engine note in `engine/paragraph_alignment.py` docstring | — |
 
 **MDC-015 suggested subtasks (all implemented):** CLI entry + argparse schema (`engine/compare_cli.py`); stable exit codes + stderr messages (`classify_engine_failure`, `main`); desktop subprocess + `PYTHONPATH` (`desktop/engine_runner.py`); compare button + error dialog + optional open output (`desktop/main_window.py`, `open_path_with_default_app`).
 

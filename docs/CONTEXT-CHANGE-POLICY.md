@@ -44,3 +44,4 @@ Keep a short history of significant context updates.
 - 2026-03-27: SCRUM-68 — Golden corpus harness (MDC-012): `README.md`, `docs/PROJECT-PLAN-V1.md` Sprint 4 harness row, `engine/corpus_harness.py`, `tests/fixtures/golden_corpus_pairs.json`, `scripts/run_golden_corpus.py`, CI note in `.github/workflows/tests.yml`, `docs/CONTEXT-CHANGE-POLICY.md` (this entry).
 - 2026-03-28: Sprint 5 implementation map added to `docs/PROJECT-PLAN-V1.md` (MDC-014–015 traceability; MDC-016–018 noted as backlog/partial per catalog).
 - 2026-03-28: CLI user-facing docs: `docs/CLI-MERCK-COMPARE.md`, `man/man1/merck-compare.1`; `README.md` links to the guide and man page; `docs/PROJECT-PLAN-V1.md` MDC-015 row lists those paths.
+- 2026-03-29: SCRUM-102 Sprint 5 audit: `docs/SCRUM-102-SPRINT5-AUDIT.md`; `docs/PROJECT-PLAN-V1.md` Sprint 5 map updated to reflect MDC-016–018 completion/traceability.
