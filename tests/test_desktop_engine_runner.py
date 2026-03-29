@@ -72,6 +72,16 @@ def test_run_compare_subprocess_success(tmp_path: Path) -> None:
     assert out.is_file()
 
 
+def test_run_compare_subprocess_logs_on_failure(caplog) -> None:
+    caplog.set_level("INFO")
+    with patch("desktop.engine_runner.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=12, stderr="boom\nmore", stdout="")
+        proc = run_compare_subprocess("/a/o.docx", "/b/r.docx", "/c/out.docx", repo_root=default_repo_root())
+    assert proc.returncode == 12
+    assert "Starting engine compare" in caplog.text
+    assert "Engine compare failed" in caplog.text
+
+
 @patch("desktop.engine_runner.subprocess.run", return_value=MagicMock(returncode=0))
 def test_open_path_with_default_app_linux_uses_xdg_open(mock_run: MagicMock, tmp_path: Path) -> None:
     target = tmp_path / "out.docx"

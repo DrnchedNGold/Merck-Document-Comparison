@@ -59,6 +59,27 @@ make desktop
 brew install python-tk@3.13
 ```
 
+### Troubleshooting (CLI + Desktop)
+
+The desktop app runs the engine CLI and shows a user-friendly headline plus **Details** text on failure.
+If you need to debug or file an issue, include the **exit code** and the **Details** section.
+
+Common failures:
+
+- **“Input documents are not eligible for compare” (exit code 10)**  
+  The engine rejected one of the inputs during preflight. Typical causes:
+  - file is not a valid `.docx` (or is corrupted)
+  - source document already contains **Track Changes** or **comments** (v1 stops and shows an error)
+
+- **“Invalid settings or usage” (exit code 2)**  
+  The compare profile JSON was unreadable/invalid (or failed validation). Try the default profile or re-save the JSON.
+
+- **“Document structure problem” (exit code 11)**  
+  The `.docx` package is missing required parts (like `word/document.xml`) or contains malformed XML. Try re-saving the document as `.docx` in Word.
+
+- **“Comparison failed” (exit code 12)**  
+  A runtime/I/O error occurred while generating output. Retry; if it repeats, include the Details text.
+
 ### Golden corpus regression harness (MDC-012)
 
 The repo includes a **config-driven harness** that runs the engine emit path on sponsor pairs under `sample-docs/` and prints **`w:ins` / `w:del` counts** per OOXML part, summarized as **document vs headers vs footers**.
