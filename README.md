@@ -30,6 +30,18 @@ make test
 
 This runs tests in Docker with Python 3.12+.
 
+### Engine compare CLI (SCRUM-83)
+
+Compare two `.docx` files and write a new document with package-wide Track Changes (`python -m engine.compare_cli` or `merck-compare` after `pip install -e .`):
+
+```bash
+python -m engine.compare_cli --original path/to/original.docx --revised path/to/revised.docx --output path/to/out.docx
+```
+
+Optional `--config` points to a JSON `CompareConfig` (same keys as `engine.DEFAULT_WORD_LIKE_COMPARE_CONFIG`). Exit codes: `0` success; `2` usage/config; `10` preflight; `11` document structure; `12` compare/emit or I/O. See `--help` for `--author` and `--date-iso`.
+
+The **desktop** app runs this CLI via subprocess (with `PYTHONPATH` set to the repo root) and can open the output file when the run succeeds.
+
 ### Golden corpus regression harness (MDC-012)
 
 The repo includes a **config-driven harness** that runs the engine emit path on sponsor pairs under `sample-docs/` and prints **`w:ins` / `w:del` counts** per OOXML part, summarized as **document vs headers vs footers**.

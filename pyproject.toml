@@ -1,5 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "merck-document-comparison"
 version = "0.1.0"
 requires-python = ">=3.12"
 description = "Monorepo baseline for the Merck document comparison project."
+
+[project.scripts]
+merck-compare = "engine.compare_cli:main"
+
+[tool.setuptools]
+packages = ["engine", "desktop"]

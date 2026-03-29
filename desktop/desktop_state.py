@@ -62,3 +62,19 @@ def pick_path_via_dialog(
     """Invoke a file dialog and return a normalized path, or empty string if cancelled."""
     raw = file_dialog(title=title, filetypes=filetypes)
     return normalize_dialog_path(raw)
+
+
+def pick_save_path_via_dialog(
+    save_dialog: FileDialogFn,
+    *,
+    title: str,
+    filetypes: list[tuple[str, str]],
+    defaultextension: str = ".docx",
+) -> str:
+    """Invoke a save dialog (e.g. ``asksaveasfilename``) and return a path, or empty if cancelled."""
+    raw = save_dialog(
+        title=title,
+        filetypes=filetypes,
+        defaultextension=defaultextension,
+    )
+    return normalize_dialog_path(raw)

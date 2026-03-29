@@ -9,13 +9,11 @@
 .DS_Store
 Thumbs.db
 
-# Golden harness CLI default output (SCRUM-68)
-golden-corpus-output/
-
 # Python cache artifacts
 __pycache__/
+*.egg-info/
 *.py[cod]
 tests/__pycache__root_old/
 
-# Local editor rules (optional)
+
 .cursor/
