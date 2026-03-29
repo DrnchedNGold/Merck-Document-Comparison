@@ -141,6 +141,7 @@ Run the golden subset locally: `python -m pytest -m golden_corpus`.
 
 ## More docs
 
+- [`docs/BUG-REPORTING-AND-PARITY.md`](docs/BUG-REPORTING-AND-PARITY.md) — how to report wrong deletes/adds/tables and settings confusion (repro bundle)  
 - [`docs/CLI-MERCK-COMPARE.md`](docs/CLI-MERCK-COMPARE.md) — `merck-compare` / `engine.compare_cli` user guide and exit codes  
 - [`docs/CAPTURE-WORD-COMPARE-SETTINGS.md`](docs/CAPTURE-WORD-COMPARE-SETTINGS.md) — Word baseline status + follow-ups  
 - [`docs/MDC-018-MOVE-DETECTION-V1.md`](docs/MDC-018-MOVE-DETECTION-V1.md) — v1 move detection decision (`w:del` + `w:ins` fallback, no `w:moveFrom`/`w:moveTo`)  
