@@ -18,6 +18,5 @@ tests/__pycache__root_old/
 
 .cursor/
 
-# Local file testing (compare CLI / desktop output trials; do not commit)
-tested_output/*
-!tested_output/.gitkeep
+# Local file testing (compare CLI / desktop output; entire directory untracked)
+tested_output/
