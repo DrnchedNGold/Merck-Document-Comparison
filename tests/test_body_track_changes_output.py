@@ -170,6 +170,83 @@ def test_write_docx_copy_with_part_replacements_overrides(tmp_path: Path) -> Non
         assert zf.read("word/styles.xml") == b"<keep/>"
 
 
+def test_emit_inserts_new_paragraph_only_in_revised(tmp_path: Path) -> None:
+    """Revised-only lines become new ``w:p`` with the full line inside ``w:ins``."""
+    orig = _minimal_docx(
+        tmp_path,
+        "<w:p><w:r><w:t>First</w:t></w:r></w:p>",
+        "ins_para_orig.docx",
+    )
+    rev = _minimal_docx(
+        tmp_path,
+        "<w:p><w:r><w:t>First</w:t></w:r></w:p>"
+        '<w:p><w:r><w:t>Second line only in B</w:t></w:r></w:p>',
+        "ins_para_rev.docx",
+    )
+    out = tmp_path / "ins_para_out.docx"
+    emit_docx_with_body_track_changes(
+        orig,
+        rev,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        author="Fixture",
+        date_iso="2026-03-28T12:00:00Z",
+    )
+    root = load_word_document_xml_root(out)
+    ps = root.findall(".//w:body/w:p", NS)
+    assert len(ps) == 2
+    second = ps[1]
+    ins = second.findall("w:ins", NS)
+    assert len(ins) == 1
+    assert _collect_t_text(ins[0]) == "Second line only in B"
+
+
+def test_emit_inserts_paragraph_between_matching_blocks(tmp_path: Path) -> None:
+    orig = _minimal_docx(
+        tmp_path,
+        "<w:p><w:r><w:t>A</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>C</w:t></w:r></w:p>",
+        "mid_ins_orig.docx",
+    )
+    rev = _minimal_docx(
+        tmp_path,
+        "<w:p><w:r><w:t>A</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>B new</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>C</w:t></w:r></w:p>",
+        "mid_ins_rev.docx",
+    )
+    out = tmp_path / "mid_ins_out.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    ps = root.findall(".//w:body/w:p", NS)
+    assert len(ps) == 3
+    assert _collect_t_text(ps[0]) == "A"
+    mid_ins = ps[1].find("w:ins", NS)
+    assert mid_ins is not None
+    assert _collect_t_text(mid_ins) == "B new"
+    assert _collect_t_text(ps[2]) == "C"
+
+
+def test_emit_marks_deleted_paragraph_only_in_original(tmp_path: Path) -> None:
+    orig = _minimal_docx(
+        tmp_path,
+        "<w:p><w:r><w:t>Keep</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>Remove me</w:t></w:r></w:p>",
+        "del_para_orig.docx",
+    )
+    rev = _minimal_docx(
+        tmp_path, "<w:p><w:r><w:t>Keep</w:t></w:r></w:p>", "del_para_rev.docx"
+    )
+    out = tmp_path / "del_para_out.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    ps = root.findall(".//w:body/w:p", NS)
+    assert len(ps) == 2
+    dels = ps[1].findall(".//w:del", NS)
+    assert len(dels) >= 1
+    assert _collect_del_text(ps[1]) == "Remove me"
+
+
 def test_emit_preserves_w_p_pr(tmp_path: Path) -> None:
     body = """<w:p>
       <w:pPr><w:pStyle w:val="Title"/></w:pPr>

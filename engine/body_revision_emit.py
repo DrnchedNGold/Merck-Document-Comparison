@@ -1,9 +1,12 @@
 """
-Emit Word Track Changes markup (w:ins / w:del) for matched body paragraphs (SCRUM-59).
+Emit Word Track Changes markup (w:ins / w:del) for body paragraphs (SCRUM-59).
 
-Uses the same concatenated-run text and :mod:`difflib` segmentation as
-:func:`engine.inline_run_diff.inline_diff_single_paragraph` so output aligns with
-inline ``DiffOp`` semantics.
+Paragraphs are aligned with :func:`engine.paragraph_alignment.align_paragraphs` (LCS
+on block signatures) so **new paragraphs only in the revised document** become
+inserted ``w:p`` elements with ``w:ins``, and paragraphs only in the original become
+full-paragraph ``w:del``. Matched paragraphs are diffed at **word/whitespace tokens**
+(``\\S+`` and ``\\s+``) so balloons match user expectations (e.g. ``100`` → ``120``).
+Inline ``DiffOp`` generation remains character-based in :mod:`engine.inline_run_diff`.
 
 Package-wide emit (SCRUM-64 / MDC-011): ``word/document.xml`` plus each
 ``word/header*.xml`` / ``word/footer*.xml`` present in the original package,
@@ -19,6 +22,7 @@ and extend markup in a dedicated parity task rather than guessing attributes her
 from __future__ import annotations
 
 import difflib
+import re
 from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import zipfile
@@ -28,6 +32,7 @@ from typing import Union
 from .compare_keys import _normalize_text
 from .contracts import BodyIR, BodyParagraph, CompareConfig
 from .document_package import parse_docx_document_package
+from .paragraph_alignment import ParagraphAlignment, align_paragraphs
 from .docx_body_ingest import WORD_NAMESPACE
 from .docx_output_package import write_docx_copy_with_part_replacements
 from .docx_package_parts import (
@@ -51,6 +56,11 @@ def _concat_paragraph_text(paragraph: BodyParagraph, config: CompareConfig) -> s
     )
 
 
+def _word_level_tokens(text: str) -> list[str]:
+    """Split into runs of non-whitespace (words, numbers, punctuation clumps) and whitespace."""
+    return re.findall(r"\S+|\s+", text)
+
+
 def _structural_block_elements(container: ET.Element) -> list[ET.Element]:
     """Direct ``w:p`` / ``w:tbl`` children (``w:body``, ``w:hdr``, or ``w:ftr``)."""
 
@@ -65,7 +75,10 @@ def _structural_block_elements(container: ET.Element) -> list[ET.Element]:
 def _paragraph_needs_revision(orig: BodyParagraph, rev: BodyParagraph, config: CompareConfig) -> bool:
     o = _concat_paragraph_text(orig, config)
     r = _concat_paragraph_text(rev, config)
-    for tag, *_ in difflib.SequenceMatcher(None, o, r).get_opcodes():
+    if o == r:
+        return False
+    ot, rt = _word_level_tokens(o), _word_level_tokens(r)
+    for tag, *_ in difflib.SequenceMatcher(None, ot, rt).get_opcodes():
         if tag != "equal":
             return True
     return False
@@ -128,25 +141,27 @@ def build_paragraph_track_change_elements(
 
     orig_text = _concat_paragraph_text(original, config)
     rev_text = _concat_paragraph_text(revised, config)
-    matcher = difflib.SequenceMatcher(None, orig_text, rev_text)
+    orig_tokens = _word_level_tokens(orig_text)
+    rev_tokens = _word_level_tokens(rev_text)
+    matcher = difflib.SequenceMatcher(None, orig_tokens, rev_tokens)
     out: list[ET.Element] = []
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
-            chunk = orig_text[i1:i2]
+            chunk = "".join(orig_tokens[i1:i2])
             if chunk:
                 out.append(_w_run_with_t(chunk))
         elif tag == "delete":
-            chunk = orig_text[i1:i2]
+            chunk = "".join(orig_tokens[i1:i2])
             if chunk:
                 out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "insert":
-            chunk = rev_text[j1:j2]
+            chunk = "".join(rev_tokens[j1:j2])
             if chunk:
                 out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "replace":
-            before = orig_text[i1:i2]
-            after = rev_text[j1:j2]
+            before = "".join(orig_tokens[i1:i2])
+            after = "".join(rev_tokens[j1:j2])
             if before:
                 out.append(_w_del_segment(before, _next_id(id_counter), author, date_iso))
             if after:
@@ -164,31 +179,104 @@ def _apply_track_changes_to_structural_container(
     date_iso: str,
     id_counter: list[int],
 ) -> None:
-    """Mutate ``container`` in place: revision markup on index-paired paragraphs."""
+    """Mutate ``container`` in place using LCS paragraph alignment (inserts, deletes, in-place edits)."""
 
     block_els = _structural_block_elements(container)
+    ob = original_ir.get("blocks", [])
+    rb = revised_ir.get("blocks", [])
 
-    for oi, oblock, rblock in _positional_paragraph_pairs(original_ir, revised_ir):
-        if oi < 0 or oi >= len(block_els):
-            continue
-        p_el = block_els[oi]
-        if _local_name(p_el.tag) != "p":
-            continue
+    if len(block_els) != len(ob):
+        for oi, oblock, rblock in _positional_paragraph_pairs(original_ir, revised_ir):
+            if oi < 0 or oi >= len(block_els):
+                continue
+            p_el = block_els[oi]
+            if _local_name(p_el.tag) != "p":
+                continue
+            orig_para: BodyParagraph = oblock  # type: ignore[assignment]
+            rev_para: BodyParagraph = rblock  # type: ignore[assignment]
+            if not _paragraph_needs_revision(orig_para, rev_para, config):
+                continue
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            _replace_p_content_preserving_p_pr(p_el, new_kids)
+        return
 
-        orig_para: BodyParagraph = oblock  # type: ignore[assignment]
-        rev_para: BodyParagraph = rblock  # type: ignore[assignment]
-        if not _paragraph_needs_revision(orig_para, rev_para, config):
-            continue
+    # Same block count: pair by index so in-place text edits (e.g. ``Hi`` → ``Hi there``)
+    # stay one paragraph with word-level ins/del. When counts differ, LCS finds inserted /
+    # deleted paragraphs (lines only in A or only in B).
+    if len(ob) == len(rb):
+        alignment = [ParagraphAlignment(i, i) for i in range(len(ob))]
+    else:
+        alignment = align_paragraphs(original_ir, revised_ir, config)
+    empty_rev = _empty_body_paragraph()
 
-        new_kids = build_paragraph_track_change_elements(
-            orig_para,
-            rev_para,
-            config,
-            id_counter=id_counter,
-            author=author,
-            date_iso=date_iso,
-        )
-        _replace_p_content_preserving_p_pr(p_el, new_kids)
+    for step_i, al in enumerate(alignment):
+        oi = al.original_paragraph_index
+        rj = al.revised_paragraph_index
+
+        if oi is not None and rj is not None:
+            oblock, rblock = ob[oi], rb[rj]
+            el = block_els[oi]
+            if oblock.get("type") != "paragraph" or rblock.get("type") != "paragraph":
+                continue
+            if _local_name(el.tag) != "p":
+                continue
+            orig_para: BodyParagraph = oblock  # type: ignore[assignment]
+            rev_para: BodyParagraph = rblock  # type: ignore[assignment]
+            if not _paragraph_needs_revision(orig_para, rev_para, config):
+                continue
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            _replace_p_content_preserving_p_pr(el, new_kids)
+        elif oi is not None and rj is None:
+            oblock = ob[oi]
+            el = block_els[oi]
+            if oblock.get("type") != "paragraph":
+                continue
+            if _local_name(el.tag) != "p":
+                continue
+            orig_para = oblock  # type: ignore[assignment]
+            if not _paragraph_needs_revision(orig_para, empty_rev, config):
+                continue
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                empty_rev,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            _replace_p_content_preserving_p_pr(el, new_kids)
+        elif oi is None and rj is not None:
+            rblock = rb[rj]
+            if rblock.get("type") != "paragraph":
+                continue
+            rev_para = rblock  # type: ignore[assignment]
+            if not _paragraph_needs_revision(empty_rev, rev_para, config):
+                continue
+            idx = _body_insert_index_before_next_orig_block(
+                container, alignment, step_i, block_els
+            )
+            new_p = _new_w_p_from_full_paragraph_insert(
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            container.insert(idx, new_p)
 
 
 def _replace_p_content_preserving_p_pr(p_el: ET.Element, new_children: list[ET.Element]) -> None:
@@ -204,17 +292,64 @@ def _replace_p_content_preserving_p_pr(p_el: ET.Element, new_children: list[ET.E
         p_el.insert(insert_at + i, node)
 
 
+def _empty_body_paragraph() -> BodyParagraph:
+    return {"type": "paragraph", "id": "_", "runs": []}
+
+
+def _body_insert_index_before_next_orig_block(
+    container: ET.Element,
+    alignment: list,
+    step_index: int,
+    block_els: list[ET.Element],
+) -> int:
+    """DOM index in ``container`` to insert a new block before the next original block (or before ``sectPr``)."""
+
+    children = list(container)
+    next_oi: int | None = None
+    for k in range(step_index + 1, len(alignment)):
+        oi = alignment[k].original_paragraph_index
+        if oi is not None:
+            next_oi = oi
+            break
+    if next_oi is not None:
+        anchor = block_els[next_oi]
+        return children.index(anchor)
+    sect = container.find("w:sectPr", NS)
+    if sect is not None:
+        return children.index(sect)
+    return len(children)
+
+
+def _new_w_p_from_full_paragraph_insert(
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> ET.Element:
+    """A ``w:p`` whose content is Track Changes for text that exists only in the revised document."""
+    kids = build_paragraph_track_change_elements(
+        _empty_body_paragraph(),
+        rev_para,
+        config,
+        id_counter=id_counter,
+        author=author,
+        date_iso=date_iso,
+    )
+    p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
+    for node in kids:
+        p_el.append(node)
+    return p_el
+
+
 def _positional_paragraph_pairs(
     original_ir: BodyIR, revised_ir: BodyIR
 ) -> list[tuple[int, BodyParagraph, BodyParagraph]]:
     """
-    Pair top-level paragraph blocks by **index** (0 with 0, 1 with 1, …) up to
-    the shorter body length.
+    Legacy index-only pairing (0↔0, 1↔1, … up to ``min`` lengths).
 
-    Signature-based :func:`engine.paragraph_alignment.align_paragraphs` only links
-    paragraphs whose compare-key signatures match, so edited text in the “same”
-    paragraph slot would never pair. Positional pairing matches the trivial
-    body-only compare case (same block order, text edits in place).
+    Used only when structural block count does not match the original IR (defensive).
     """
 
     ob = original_ir.get("blocks", [])
@@ -239,9 +374,8 @@ def apply_body_track_changes_to_document_root(
     id_counter: list[int] | None = None,
 ) -> None:
     """
-    Mutate ``document_root`` (``w:document``): for each index-paired paragraph
-    block that differs, replace non-``w:pPr`` content under the corresponding
-    ``w:p`` with Track Changes children.
+    Mutate ``document_root`` (``w:document``): align body blocks to the revised IR,
+    then apply Track Changes (including inserted ``w:p`` / full-paragraph deletes).
 
     When ``id_counter`` is omitted, a fresh counter is used for this part only.
     Pass a shared list for package-wide unique ``w:id`` values (MDC-011).
@@ -277,8 +411,8 @@ def apply_track_changes_to_hdr_ftr_root(
     id_counter: list[int] | None = None,
 ) -> None:
     """
-    Mutate a ``w:hdr`` or ``w:ftr`` root in place using the same positional
-    paragraph pairing as the main document body.
+    Mutate a ``w:hdr`` or ``w:ftr`` root in place using the same LCS block alignment
+    as the main document body.
     """
 
     ln = _local_name(hdr_or_ftr_root.tag)
