@@ -27,6 +27,7 @@ and extend markup in a dedicated parity task rather than guessing attributes her
 
 from __future__ import annotations
 
+import copy
 import difflib
 import re
 from datetime import datetime, timezone
@@ -76,6 +77,135 @@ def _structural_block_elements(container: ET.Element) -> list[ET.Element]:
         if ln in ("p", "tbl"):
             out.append(child)
     return out
+
+
+def _structural_block_elements_for_part_root(root: ET.Element, part_path: str) -> list[ET.Element]:
+    """Top-level ``w:p`` / ``w:tbl`` for ``word/document.xml`` or a header/footer root."""
+
+    if part_path == DOCUMENT_PART_PATH:
+        body = root.find("w:body", NS)
+        if body is None:
+            return []
+        return _structural_block_elements(body)
+    ln = _local_name(root.tag)
+    if ln in ("hdr", "ftr"):
+        return _structural_block_elements(root)
+    return []
+
+
+def load_structural_block_elements_from_docx_part(zf: zipfile.ZipFile, part_path: str) -> list[ET.Element]:
+    """Parse one package part and return structural block elements in document order."""
+
+    raw = zf.read(part_path)
+    root = ET.fromstring(raw)
+    return _structural_block_elements_for_part_root(root, part_path)
+
+
+def _paragraph_style_is_toc(p_el: ET.Element) -> bool:
+    """
+    True when the paragraph uses a Word TOC line style (``TOC1`` … ``TOC9``, etc.).
+
+    Standalone TOC insert/delete emit must preserve ``w:tab`` / tab leaders and run
+    layout; body IR text alone drops tabs and collapses TOC lines.
+    """
+
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        return False
+    ps = ppr.find("w:pStyle", NS)
+    if ps is None:
+        return False
+    val = ps.get(f"{{{WORD_NAMESPACE}}}val")
+    if not val:
+        return False
+    u = val.strip().upper()
+    return u.startswith("TOC")
+
+
+def _runs_convert_w_t_to_del_text(root: ET.Element) -> None:
+    """In-place: each ``w:t`` directly under ``w:r`` becomes ``w:delText`` (Track Changes delete)."""
+
+    for r_el in root.iter():
+        if _local_name(r_el.tag) != "r":
+            continue
+        for idx, ch in enumerate(list(r_el)):
+            if _local_name(ch.tag) != "t":
+                continue
+            r_el.remove(ch)
+            dt = ET.Element(f"{{{WORD_NAMESPACE}}}delText")
+            for k, v in ch.attrib.items():
+                dt.set(k, v)
+            dt.text = ch.text
+            dt.tail = ch.tail
+            r_el.insert(idx, dt)
+
+
+def _new_w_p_toc_insert_from_revised_source(
+    p_rev_source: ET.Element,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> ET.Element:
+    """
+    Build a ``w:p`` for a revised-only TOC line: ``w:pPr`` unchanged, body wrapped in one ``w:ins``.
+
+    Deep-copies runs so ``w:tab``, paragraph styles, and run formatting are preserved.
+    """
+
+    p_out = ET.Element(f"{{{WORD_NAMESPACE}}}p")
+    ins_el = ET.Element(
+        f"{{{WORD_NAMESPACE}}}ins",
+        {
+            f"{{{WORD_NAMESPACE}}}id": _next_id(id_counter),
+            f"{{{WORD_NAMESPACE}}}author": author,
+            f"{{{WORD_NAMESPACE}}}date": date_iso,
+        },
+    )
+    for ch in p_rev_source:
+        ln = _local_name(ch.tag)
+        if ln == "pPr":
+            p_out.append(copy.deepcopy(ch))
+        else:
+            ins_el.append(copy.deepcopy(ch))
+    p_out.append(ins_el)
+    return p_out
+
+
+def _replace_toc_paragraph_with_del_preserving_layout(
+    p_el: ET.Element,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> None:
+    """
+    Full-paragraph delete for a TOC-style line: wrap a deep copy of content in ``w:del``.
+
+    Replaces non-``pPr`` children; ``w:t`` in runs becomes ``w:delText`` inside ``w:del``.
+    """
+
+    del_el = ET.Element(
+        f"{{{WORD_NAMESPACE}}}del",
+        {
+            f"{{{WORD_NAMESPACE}}}id": _next_id(id_counter),
+            f"{{{WORD_NAMESPACE}}}author": author,
+            f"{{{WORD_NAMESPACE}}}date": date_iso,
+        },
+    )
+    for ch in list(p_el):
+        if _local_name(ch.tag) == "pPr":
+            continue
+        clone = copy.deepcopy(ch)
+        _runs_convert_w_t_to_del_text(clone)
+        del_el.append(clone)
+        p_el.remove(ch)
+    insert_at = 0
+    for i, ch in enumerate(p_el):
+        if _local_name(ch.tag) == "pPr":
+            insert_at = i + 1
+            break
+    p_el.insert(insert_at, del_el)
 
 
 def _paragraph_needs_revision(orig: BodyParagraph, rev: BodyParagraph, config: CompareConfig) -> bool:
@@ -336,6 +466,8 @@ def _apply_track_changes_to_structural_container(
     author: str,
     date_iso: str,
     id_counter: list[int],
+    *,
+    revised_block_elements: list[ET.Element] | None = None,
 ) -> None:
     """Mutate ``container`` in place using LCS paragraph alignment (inserts, deletes, in-place edits)."""
 
@@ -396,15 +528,23 @@ def _apply_track_changes_to_structural_container(
             orig_para = oblock  # type: ignore[assignment]
             if not _paragraph_needs_revision(orig_para, empty_rev, config):
                 continue
-            new_kids = build_paragraph_track_change_elements(
-                orig_para,
-                empty_rev,
-                config,
-                id_counter=id_counter,
-                author=author,
-                date_iso=date_iso,
-            )
-            _replace_p_content_preserving_p_pr(el, new_kids)
+            if _paragraph_style_is_toc(el):
+                _replace_toc_paragraph_with_del_preserving_layout(
+                    el,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
+            else:
+                new_kids = build_paragraph_track_change_elements(
+                    orig_para,
+                    empty_rev,
+                    config,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
+                _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is None and rj is not None:
             rblock = rb[rj]
             if rblock.get("type") != "paragraph":
@@ -415,13 +555,28 @@ def _apply_track_changes_to_structural_container(
             idx = _body_insert_index_before_next_orig_block(
                 container, alignment, step_i, block_els
             )
-            new_p = _new_w_p_from_full_paragraph_insert(
-                rev_para,
-                config,
-                id_counter=id_counter,
-                author=author,
-                date_iso=date_iso,
-            )
+            rev_el: ET.Element | None = None
+            if (
+                revised_block_elements is not None
+                and rj < len(revised_block_elements)
+                and _local_name(revised_block_elements[rj].tag) == "p"
+            ):
+                rev_el = revised_block_elements[rj]
+            if rev_el is not None and _paragraph_style_is_toc(rev_el):
+                new_p = _new_w_p_toc_insert_from_revised_source(
+                    rev_el,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
+            else:
+                new_p = _new_w_p_from_full_paragraph_insert(
+                    rev_para,
+                    config,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
             container.insert(idx, new_p)
 
 
@@ -498,6 +653,7 @@ def apply_body_track_changes_to_document_root(
     author: str = "MerckDocCompare",
     date_iso: str | None = None,
     id_counter: list[int] | None = None,
+    revised_block_elements: list[ET.Element] | None = None,
 ) -> None:
     """
     Mutate ``document_root`` (``w:document``): align body blocks to the revised IR,
@@ -523,6 +679,7 @@ def apply_body_track_changes_to_document_root(
         author,
         date_iso,
         counter,
+        revised_block_elements=revised_block_elements,
     )
 
 
@@ -535,6 +692,7 @@ def apply_track_changes_to_hdr_ftr_root(
     author: str = "MerckDocCompare",
     date_iso: str | None = None,
     id_counter: list[int] | None = None,
+    revised_block_elements: list[ET.Element] | None = None,
 ) -> None:
     """
     Mutate a ``w:hdr`` or ``w:ftr`` root in place using the same LCS block alignment
@@ -557,6 +715,7 @@ def apply_track_changes_to_hdr_ftr_root(
         author,
         date_iso,
         counter,
+        revised_block_elements=revised_block_elements,
     )
 
 
@@ -587,6 +746,12 @@ def emit_docx_with_package_track_changes(
         date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     id_counter = [0]
+    with zipfile.ZipFile(rev_path, "r") as zrev:
+        rev_doc_blocks = load_structural_block_elements_from_docx_part(zrev, DOCUMENT_PART_PATH)
+        rev_hf_blocks: dict[str, list[ET.Element]] = {}
+        for _part in discover_header_footer_part_paths_from_namelist(zrev.namelist()):
+            rev_hf_blocks[_part] = load_structural_block_elements_from_docx_part(zrev, _part)
+
     with zipfile.ZipFile(orig_path, "r") as zin:
         raw_document_xml = zin.read(DOCUMENT_PART_PATH)
     root = ET.fromstring(raw_document_xml)
@@ -598,6 +763,7 @@ def emit_docx_with_package_track_changes(
         author=author,
         date_iso=date_iso,
         id_counter=id_counter,
+        revised_block_elements=rev_doc_blocks,
     )
 
     replacements: dict[str, bytes] = {
@@ -611,6 +777,7 @@ def emit_docx_with_package_track_changes(
             hf_root = ET.fromstring(raw_hf)
             o_ir = orig_pkg["header_footer"].get(part, empty_ir)
             r_ir = rev_pkg["header_footer"].get(part, empty_ir)
+            rev_hf_el = rev_hf_blocks.get(part)
             apply_track_changes_to_hdr_ftr_root(
                 hf_root,
                 o_ir,
@@ -619,6 +786,7 @@ def emit_docx_with_package_track_changes(
                 author=author,
                 date_iso=date_iso,
                 id_counter=id_counter,
+                revised_block_elements=rev_hf_el,
             )
             replacements[part] = serialize_ooxml_part(hf_root, raw_hf)
 
