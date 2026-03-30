@@ -20,7 +20,10 @@ __pycache__/
 tests/__pycache__root_old/
 
 
-.cursor/
+# Local Cursor state; shared agent rules under .cursor/rules/ are tracked.
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 
 # Local file testing (compare CLI / desktop output; entire directory untracked)
 tested_output/

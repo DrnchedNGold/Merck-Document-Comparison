@@ -56,6 +56,31 @@ def test_alignment_handles_small_reorder() -> None:
     )
 
 
+def test_alignment_toc_slot_reworded_title_pairs_same_paragraph() -> None:
+    """SCRUM-116: same TOC section number + tab leaders should not become delete+insert."""
+    original = {
+        "version": 1,
+        "blocks": [
+            _p("Front matter."),
+            _p("1.2.1\tPathophysiology\t9"),
+            _p("1.2.2\tPrevention, Screening or Diagnostic Strategies\t10"),
+            _p("Tail."),
+        ],
+    }
+    revised = {
+        "version": 1,
+        "blocks": [
+            _p("Front matter."),
+            _p("1.2.1\tDifferences in Pathophysiology\t12"),
+            _p("1.2.2\tDifferences in Prevention, Screening, or Diagnostic Strategies\t13"),
+            _p("Tail."),
+        ],
+    }
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+    assert pairs == [(0, 0), (1, 1), (2, 2), (3, 3)]
+
+
 def test_alignment_empty_both_sides() -> None:
     original = {"version": 1, "blocks": []}
     revised = {"version": 1, "blocks": []}

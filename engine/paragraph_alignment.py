@@ -15,6 +15,11 @@ Algorithm
     whole paragraphs. Without this, emit marks the **entire** paragraph as
     deleted and re-inserted instead of in-place ``w:ins`` / ``w:del`` on words.
 
+    **TOC rows** (same numbered section prefix, tab-separated title/page) use a
+    relaxed gate when titles are reworded but the entry is still the same slot
+    (SCRUM-116); otherwise ``quick_ratio`` can sit near ~0.7 and miss the global
+    bar.
+
     Backtracking prefers deleting from the original when LCS tie-breaks are
     equal (``dp[i+1][j] >= dp[i][j+1]``).
 
@@ -47,11 +52,50 @@ _ALIGN_FUZZY_QUICK_MIN = 0.86
 # at least this. Token ratio matches :func:`engine.body_revision_emit._word_level_tokens`.
 _ALIGN_FUZZY_COMBINED_MIN = 0.76
 
+# TOC lines (section number + tab + title + tab + page) often get reworded titles while
+# keeping the same entry (e.g. ``1.2.1`` … ``Pathophysiology`` → ``Differences in …``).
+# Global fuzzy gates then miss (``quick_ratio`` ~0.71 < 0.86), LCS pairs them as
+# delete+insert, and emit shows full-line strikethrough + duplicate line (SCRUM-116).
+_TOC_SLOT_PREFIX_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)")
+
+# Relaxed gates when both lines share the same TOC section prefix and contain a tab.
+_TOC_SLOT_QUICK_MIN = 0.50
+_TOC_SLOT_COMBINED_MIN = 0.55
+
 
 @dataclass(frozen=True)
 class ParagraphAlignment:
     original_paragraph_index: int | None
     revised_paragraph_index: int | None
+
+
+def _toc_section_prefix_for_alignment(txt: str) -> str | None:
+    """Leading numbered section id (``1``, ``1.2.1``, …) or None if not TOC-shaped."""
+
+    m = _TOC_SLOT_PREFIX_RE.match(txt.lstrip())
+    return m.group(1) if m else None
+
+
+def _toc_slot_pair_relaxed_align(o_txt: str, r_txt: str) -> bool:
+    """
+    True when both lines look like TOC entries with the same section number and
+    enough textual overlap to treat as the same paragraph for alignment.
+    """
+
+    if "\t" not in o_txt or "\t" not in r_txt:
+        return False
+    po, pr = _toc_section_prefix_for_alignment(o_txt), _toc_section_prefix_for_alignment(
+        r_txt
+    )
+    if not po or po != pr:
+        return False
+    sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
+    q = sm.quick_ratio()
+    char_r = sm.ratio()
+    ot = re.findall(r"\S+|\s+", o_txt)
+    rt = re.findall(r"\S+|\s+", r_txt)
+    tok_r = difflib.SequenceMatcher(None, ot, rt, autojunk=False).ratio()
+    return q >= _TOC_SLOT_QUICK_MIN and max(char_r, tok_r) >= _TOC_SLOT_COMBINED_MIN
 
 
 def _block_signature(body_ir: BodyIR, block_index: int, config: CompareConfig) -> str:
@@ -127,6 +171,9 @@ def _blocks_align_in_lcs(
     if lo and lr and min(lo, lr) / max(lo, lr) < 0.45:
         cache[key] = False
         return False
+    if _toc_slot_pair_relaxed_align(o_txt, r_txt):
+        cache[key] = True
+        return True
     sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
     if sm.quick_ratio() < _ALIGN_FUZZY_QUICK_MIN:
         cache[key] = False
