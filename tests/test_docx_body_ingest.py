@@ -165,6 +165,58 @@ def test_parse_docx_body_ir_includes_table_block(tmp_path: Path) -> None:
     }
 
 
+def test_parse_docx_body_ir_preserves_w_tab_inside_run(tmp_path: Path) -> None:
+    """SCRUM-105: tab between label and value must not be dropped (compare/emit concat)."""
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Version Number:</w:t><w:tab/><w:t>1.0</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>
+"""
+
+    docx_path = _make_docx_with_document_xml(tmp_path, document_xml)
+    body_ir = parse_docx_body_ir(docx_path)
+    assert body_ir["blocks"][0]["runs"][0]["text"] == "Version Number:\t1.0"
+
+
+def test_parse_docx_body_ir_preserves_w_tab_across_separate_runs(tmp_path: Path) -> None:
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}">
+  <w:body>
+    <w:p>
+      <w:r><w:t>DIVERSITY PLAN</w:t></w:r>
+      <w:r><w:tab/></w:r>
+      <w:r><w:t>LOCALLY</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>
+"""
+
+    docx_path = _make_docx_with_document_xml(tmp_path, document_xml)
+    body_ir = parse_docx_body_ir(docx_path)
+    runs = body_ir["blocks"][0]["runs"]
+    assert [run["text"] for run in runs] == ["DIVERSITY PLAN", "\t", "LOCALLY"]
+
+
+def test_parse_docx_body_ir_w_br_inserts_newline_in_run_text(tmp_path: Path) -> None:
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Line1</w:t><w:br/><w:t>Line2</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>
+"""
+
+    docx_path = _make_docx_with_document_xml(tmp_path, document_xml)
+    body_ir = parse_docx_body_ir(docx_path)
+    assert body_ir["blocks"][0]["runs"][0]["text"] == "Line1\nLine2"
+
+
 def test_load_word_document_xml_root_parses_document(tmp_path: Path) -> None:
     document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="{WORD_NS}">

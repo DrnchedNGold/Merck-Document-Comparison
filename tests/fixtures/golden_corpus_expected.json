@@ -42,8 +42,8 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 227,
-          "ins": 262
+          "del": 229,
+          "ins": 263
         },
         "word/footer1.xml": {
           "del": 0,
@@ -56,8 +56,8 @@
       },
       "summary": {
         "document": {
-          "del": 227,
-          "ins": 262
+          "del": 229,
+          "ins": 263
         },
         "footers": {
           "del": 0,
@@ -118,8 +118,8 @@
     "email3-ib-10-11": {
       "by_part": {
         "word/document.xml": {
-          "del": 2143,
-          "ins": 2112
+          "del": 2162,
+          "ins": 2120
         },
         "word/footer1.xml": {
           "del": 0,
@@ -360,8 +360,8 @@
       },
       "summary": {
         "document": {
-          "del": 2143,
-          "ins": 2112
+          "del": 2162,
+          "ins": 2120
         },
         "footers": {
           "del": 2,
@@ -376,8 +376,8 @@
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 1448,
-          "ins": 1762
+          "del": 1463,
+          "ins": 1789
         },
         "word/footer1.xml": {
           "del": 2,
@@ -602,8 +602,8 @@
       },
       "summary": {
         "document": {
-          "del": 1448,
-          "ins": 1762
+          "del": 1463,
+          "ins": 1789
         },
         "footers": {
           "del": 4,
@@ -618,15 +618,15 @@
     "email3-protocol-1026": {
       "by_part": {
         "word/document.xml": {
-          "del": 896,
-          "ins": 929
+          "del": 897,
+          "ins": 988
         },
         "word/footer1.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/footer2.xml": {
-          "del": 1,
+          "del": 2,
           "ins": 0
         },
         "word/footer3.xml": {
@@ -648,12 +648,12 @@
       },
       "summary": {
         "document": {
-          "del": 896,
-          "ins": 929
+          "del": 897,
+          "ins": 988
         },
         "footers": {
-          "del": 1,
-          "ins": 1
+          "del": 2,
+          "ins": 2
         },
         "headers": {
           "del": 2,
@@ -664,8 +664,8 @@
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 1161,
-          "ins": 1132
+          "del": 1171,
+          "ins": 1147
         },
         "word/footer1.xml": {
           "del": 0,
@@ -681,7 +681,7 @@
         },
         "word/footer2.xml": {
           "del": 0,
-          "ins": 0
+          "ins": 1
         },
         "word/footer3.xml": {
           "del": 0,
@@ -758,12 +758,12 @@
       },
       "summary": {
         "document": {
-          "del": 1161,
-          "ins": 1132
+          "del": 1171,
+          "ins": 1147
         },
         "footers": {
           "del": 0,
-          "ins": 0
+          "ins": 1
         },
         "headers": {
           "del": 0,
