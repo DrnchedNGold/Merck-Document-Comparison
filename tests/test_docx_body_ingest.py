@@ -87,6 +87,22 @@ def test_parse_docx_body_ir_skips_runs_with_no_text_nodes(tmp_path: Path) -> Non
     assert body_ir["blocks"][0]["runs"] == [{"text": "Visible text only."}]
 
 
+def test_parse_docx_body_ir_preserves_w_tab_in_run_order(tmp_path: Path) -> None:
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Topic</w:t><w:tab/><w:t>6</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>
+"""
+
+    docx_path = _make_docx_with_document_xml(tmp_path, document_xml)
+    body_ir = parse_docx_body_ir(docx_path)
+    assert body_ir["blocks"][0]["runs"] == [{"text": "Topic\t6"}]
+
+
 def test_parse_docx_body_ir_includes_table_block(tmp_path: Path) -> None:
     document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="{WORD_NS}">
