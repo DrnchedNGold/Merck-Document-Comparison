@@ -103,6 +103,30 @@ def test_build_paragraph_track_change_unrelated_phrase_not_single_del() -> None:
     )
 
 
+def test_build_paragraph_track_change_toc_line_preserves_w_tab_around_page_change() -> None:
+    """SCRUM-111: TOC-style ``heading`` + tab + page number keeps ``w:tab`` when only the number changes."""
+    orig = _paragraph_block("Topic\t6")
+    rev = _paragraph_block("Topic\t7")
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-03-28T00:00:00Z",
+    )
+    p_xml = ET.Element(f"{{{WORD_NS}}}p")
+    for el in els:
+        p_xml.append(el)
+    tabs = p_xml.findall(".//w:tab", NS)
+    assert len(tabs) >= 1
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
+    assert len(dels) == 1 and len(inses) == 1
+    assert _collect_del_text(dels[0]) == "6"
+    assert _collect_t_text(inses[0]) == "7"
+
+
 def test_build_paragraph_track_change_replace_has_del_then_ins() -> None:
     # Avoid shared trailing characters so SequenceMatcher emits one clean replace.
     orig = _paragraph_block("aaa bbb")

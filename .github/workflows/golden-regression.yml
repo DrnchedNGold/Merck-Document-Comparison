@@ -46,9 +46,12 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Run golden_corpus tests excluding snapshot pairs
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           set -o pipefail
-          python -m pytest -m golden_corpus -k "not test_golden_harness_emit_counts_match_committed_baseline" -v --tb=short --durations=15 2>&1 | tee golden-regression-non-snapshot.log
+          # --capture=tee-sys: show progress while still capturing failures (default capture hides output until each test ends).
+          python -m pytest -m golden_corpus -k "not test_golden_harness_emit_counts_match_committed_baseline" -v --tb=short --durations=15 --capture=tee-sys 2>&1 | tee golden-regression-non-snapshot.log
 
       - name: Upload golden regression log (non-snapshot)
         uses: actions/upload-artifact@v4
@@ -88,9 +91,12 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Run snapshot regression for one pair
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           set -o pipefail
-          python -m pytest -m golden_corpus -k "test_golden_harness_emit_counts_match_committed_baseline and ${{ matrix.pair_id }}" -v --tb=short --durations=15 2>&1 | tee golden-regression-snapshot-${{ matrix.pair_id }}.log
+          # Large IB pairs can run 20–40+ min; tee-sys + unbuffered Python avoids a silent log that looks stuck.
+          python -m pytest -m golden_corpus -k "test_golden_harness_emit_counts_match_committed_baseline and ${{ matrix.pair_id }}" -v --tb=short --durations=15 --capture=tee-sys 2>&1 | tee golden-regression-snapshot-${{ matrix.pair_id }}.log
 
       - name: Upload golden regression log (snapshot)
         uses: actions/upload-artifact@v4

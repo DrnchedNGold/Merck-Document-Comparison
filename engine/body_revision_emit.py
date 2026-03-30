@@ -23,6 +23,9 @@ with one shared ``w:id`` counter across all revised parts.
 additional Word-specific attributes (for example ``w:rsid*`` on runs or paragraphs).
 If Word rejects or rewrites output on real sponsor documents, capture a failing case
 and extend markup in a dedicated parity task rather than guessing attributes here.
+
+Ingest maps ``w:tab`` inside ``w:r`` to ``\\t`` in run text; emit splits on ``\\t`` and
+outputs ``w:tab`` elements again so TOC lines keep tab stops (dot leaders from ``w:pPr``).
 """
 
 from __future__ import annotations
@@ -95,13 +98,44 @@ def _next_id(counter: list[int]) -> str:
     return str(counter[0])
 
 
-def _w_run_with_t(text: str) -> ET.Element:
+def _text_needs_xml_space_preserve(text: str) -> bool:
+    if not text:
+        return False
+    return text[:1].isspace() or text[-1:].isspace()
+
+
+def _w_tab_run() -> ET.Element:
+    r_el = ET.Element(f"{{{WORD_NAMESPACE}}}r")
+    ET.SubElement(r_el, f"{{{WORD_NAMESPACE}}}tab")
+    return r_el
+
+
+def _w_run_single_t(text: str) -> ET.Element:
+    """One ``w:r`` with ``w:t`` only (no ``\\t`` in *text* — use :func:`_w_runs_for_plain_text`)."""
+
+    assert "\t" not in text
     r_el = ET.Element(f"{{{WORD_NAMESPACE}}}r")
     t_el = ET.SubElement(r_el, f"{{{WORD_NAMESPACE}}}t")
-    if text[:1].isspace() or text[-1:].isspace() or "\t" in text:
+    if _text_needs_xml_space_preserve(text):
         t_el.set(f"{{{XML_NAMESPACE}}}space", "preserve")
     t_el.text = text
     return r_el
+
+
+def _w_runs_for_plain_text(text: str) -> list[ET.Element]:
+    """``w:r`` sequence: ``w:t`` segments separated by ``w:tab`` for each ``\\t``."""
+
+    if not text:
+        return []
+    if "\t" not in text:
+        return [_w_run_single_t(text)]
+    out: list[ET.Element] = []
+    for i, part in enumerate(text.split("\t")):
+        if i > 0:
+            out.append(_w_tab_run())
+        if part:
+            out.append(_w_run_single_t(part))
+    return out
 
 
 def _w_del_segment(text: str, del_id: str, author: str, date_iso: str) -> ET.Element:
@@ -113,11 +147,16 @@ def _w_del_segment(text: str, del_id: str, author: str, date_iso: str) -> ET.Ele
             f"{{{WORD_NAMESPACE}}}date": date_iso,
         },
     )
-    r_el = ET.SubElement(del_el, f"{{{WORD_NAMESPACE}}}r")
-    dt = ET.SubElement(r_el, f"{{{WORD_NAMESPACE}}}delText")
-    if text[:1].isspace() or text[-1:].isspace() or "\t" in text:
-        dt.set(f"{{{XML_NAMESPACE}}}space", "preserve")
-    dt.text = text
+    for i, part in enumerate(text.split("\t")):
+        if i > 0:
+            del_el.append(_w_tab_run())
+        if not part:
+            continue
+        r_el = ET.SubElement(del_el, f"{{{WORD_NAMESPACE}}}r")
+        dt = ET.SubElement(r_el, f"{{{WORD_NAMESPACE}}}delText")
+        if _text_needs_xml_space_preserve(part):
+            dt.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+        dt.text = part
     return del_el
 
 
@@ -130,7 +169,8 @@ def _w_ins_segment(text: str, ins_id: str, author: str, date_iso: str) -> ET.Ele
             f"{{{WORD_NAMESPACE}}}date": date_iso,
         },
     )
-    ins_el.append(_w_run_with_t(text))
+    for run in _w_runs_for_plain_text(text):
+        ins_el.append(run)
     return ins_el
 
 
@@ -165,7 +205,7 @@ def _emit_word_only_track_change_fragment(
     out: list[ET.Element] = []
     lead_b = re.match(r"^\s+", before)
     if lead_b:
-        out.append(_w_run_with_t(lead_b.group(0)))
+        out.extend(_w_runs_for_plain_text(lead_b.group(0)))
     trail_b = re.search(r"\s+$", before)
     trail_b_s = trail_b.group(0) if trail_b else ""
 
@@ -173,14 +213,14 @@ def _emit_word_only_track_change_fragment(
     wa = re.findall(r"\S+", after)
     if not wb and not wa:
         if trail_b_s:
-            out.append(_w_run_with_t(trail_b_s))
+            out.extend(_w_runs_for_plain_text(trail_b_s))
         return out
 
     sm = difflib.SequenceMatcher(None, wb, wa, autojunk=False)
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             if i1 < i2:
-                out.append(_w_run_with_t(" ".join(wb[i1:i2])))
+                out.extend(_w_runs_for_plain_text(" ".join(wb[i1:i2])))
         elif tag == "delete":
             for w in wb[i1:i2]:
                 out.append(_w_del_segment(w, _next_id(id_counter), author, date_iso))
@@ -206,7 +246,7 @@ def _emit_word_only_track_change_fragment(
                     _w_ins_segment(slice_a[k], _next_id(id_counter), author, date_iso)
                 )
     if trail_b_s:
-        out.append(_w_run_with_t(trail_b_s))
+        out.extend(_w_runs_for_plain_text(trail_b_s))
     return out
 
 
@@ -245,7 +285,7 @@ def _emit_word_token_track_change_fragment(
         if tag == "equal":
             chunk = "".join(ot[i1:i2])
             if chunk:
-                out.append(_w_run_with_t(chunk))
+                out.extend(_w_runs_for_plain_text(chunk))
         elif tag == "delete":
             chunk = "".join(ot[i1:i2])
             if chunk:
@@ -297,7 +337,7 @@ def build_paragraph_track_change_elements(
         if tag == "equal":
             chunk = "".join(orig_tokens[i1:i2])
             if chunk:
-                out.append(_w_run_with_t(chunk))
+                out.extend(_w_runs_for_plain_text(chunk))
         elif tag == "delete":
             chunk = "".join(orig_tokens[i1:i2])
             if chunk:

@@ -5,6 +5,10 @@ Converts `word/document.xml` from a `.docx` into the project Body IR shape.
 This is intentionally minimal: it parses block-level `w:p` and `w:tbl` in
 `w:body` order, with paragraph/run text deterministically and formatting
 details ignored for now.
+
+``w:tab`` inside ``w:r`` is preserved as a U+0009 tab in the concatenated run text
+so Table of Contents lines (tab to right-aligned page number with dot leaders from
+``w:pPr`` tab stops) survive ingest and can be re-emitted as ``w:tab`` in Track Changes.
 """
 
 from __future__ import annotations
@@ -54,14 +58,23 @@ def load_word_document_xml_root(docx_path: Union[str, Path]) -> ET.Element:
     return ET.fromstring(document_xml)
 
 
+def _run_text_from_w_r(r: ET.Element) -> str:
+    """Ordered text + tab markers from one ``w:r`` (direct children only)."""
+
+    parts: list[str] = []
+    for child in r:
+        ln = _local_name(child.tag)
+        if ln == "t" and child.text:
+            parts.append(child.text)
+        elif ln == "tab":
+            parts.append("\t")
+    return "".join(parts)
+
+
 def _parse_runs_from_paragraph(p: ET.Element) -> list[BodyRun]:
     runs: list[BodyRun] = []
     for r in p.findall(".//w:r", NS):
-        text_parts: list[str] = []
-        for t in r.findall(".//w:t", NS):
-            if t.text:
-                text_parts.append(t.text)
-        run_text = "".join(text_parts)
+        run_text = _run_text_from_w_r(r)
         if run_text:
             runs.append({"text": run_text})
     return runs
@@ -130,7 +143,8 @@ def parse_docx_body_ir(docx_path: Union[str, Path]) -> BodyIR:
     - Block order follows direct children of `w:body` (`w:p`, `w:tbl`, ...).
     - Paragraph `id` values are assigned in document reading order (including
       paragraphs inside table cells).
-    - Each run's text is the concatenation of all `w:t` text nodes under `w:r`.
+    - Each run's text is the concatenation of `w:t` text and ``\\t`` for each direct
+      child ``w:tab`` under `w:r`, in document order.
     """
 
     root = load_word_document_xml_root(docx_path)

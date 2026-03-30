@@ -74,6 +74,14 @@ def test_golden_harness_emit_counts_match_committed_baseline(
         root / "tests/fixtures/golden_corpus_expected.json"
     )
 
+    # Emit dominates runtime (especially email3-ib-10-11). CI logs stay empty under
+    # default pytest capture; workflow uses --capture=tee-sys so this line appears live.
+    print(
+        f"[golden snapshot] emit+count starting pair_id={pair_id!r} "
+        "(large IB pairs often need 20–40+ minutes on GitHub runners — not frozen)",
+        flush=True,
+    )
+
     batch = run_configured_pairs(
         root,
         [by_id[pair_id]],
