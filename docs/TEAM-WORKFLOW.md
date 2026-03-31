@@ -61,6 +61,7 @@ If the AI says it **cannot** push or create the PR, see **`docs/TEAM-PLAYBOOK.md
 
 ## Where extra detail lives
 
+- **Cursor agent** — always-on workflow guardrails live in **`.cursor/rules/merck-team-workflow.mdc`** (playbook before code, feature branches, no task work on `main`). Keep that file aligned with this doc when process changes.
 - **Jira** — active issue: key + summary (e.g. **`MDC-007 Inline diff for runs`**) + description + acceptance criteria.
 - **`docs/V1-ACCEPTANCE-CATALOG.md`** — V1 acceptance criteria reference catalog; use the section that matches your issue title when you need acceptance language.
 - **`docs/TEAM-PLAYBOOK.md`** — copy-paste prompts for tasks, shipping, and scope recovery.
