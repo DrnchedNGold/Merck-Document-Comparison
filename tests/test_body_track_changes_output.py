@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
 from engine.body_revision_emit import (
+    _build_toc_matched_line_track_change_elements,
     build_paragraph_track_change_elements,
     emit_docx_with_body_track_changes,
 )
@@ -125,6 +126,49 @@ def test_build_paragraph_track_change_split_tab_run_with_ignore_whitespace() -> 
     assert ".0" in plain_r_text
     assert del_text == "1"
     assert ins_text == "2"
+
+
+def test_toc_matched_line_track_change_preserves_w_tab_with_ignore_whitespace() -> None:
+    """SCRUM-112: TOC-only builder keeps ``\\t`` in emit when ignore_whitespace=True."""
+    cfg = dict(DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    cfg["ignore_whitespace"] = True
+
+    orig = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [
+            {"text": "1"},
+            {"text": "\t"},
+            {"text": "OVERVIEW"},
+        ],
+    }
+    rev = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [
+            {"text": "1"},
+            {"text": "\t"},
+            {"text": "SCOPE"},
+        ],
+    }
+
+    els = _build_toc_matched_line_track_change_elements(
+        orig,
+        rev,
+        cfg,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-03-30T00:00:00Z",
+    )
+
+    p_xml = ET.Element(f"{{{WORD_NS}}}p")
+    for el in els:
+        p_xml.append(el)
+    assert len(p_xml.findall(".//w:tab", NS)) >= 1
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
+    assert any("OVERVIEW" in _collect_del_text(d) for d in dels)
+    assert any("SCOPE" in _collect_t_text(i) for i in inses)
 
 
 def test_build_paragraph_track_change_preserves_unchanged_date_year_suffix() -> None:

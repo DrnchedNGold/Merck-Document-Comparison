@@ -26,6 +26,9 @@ and extend markup in a dedicated parity task rather than guessing attributes her
 
 Ingest maps ``w:tab`` inside ``w:r`` to ``\\t`` in run text; emit splits on ``\\t`` and
 outputs ``w:tab`` elements again so TOC lines keep tab stops (dot leaders from ``w:pPr``).
+Matched ``w:p`` with ``TOC*`` styles use :func:`_build_toc_matched_line_track_change_elements`
+(tab-preserving concat when *ignore_whitespace* is True, SCRUM-112). The public
+:func:`build_paragraph_track_change_elements` path is unchanged for non-TOC content.
 """
 
 from __future__ import annotations
@@ -69,6 +72,16 @@ def _concat_paragraph_text(paragraph: BodyParagraph, config: CompareConfig) -> s
 def _word_level_tokens(text: str) -> list[str]:
     """Split into runs of non-whitespace (words, numbers, punctuation clumps) and whitespace."""
     return re.findall(r"\S+|\s+", text)
+
+
+def _token_level_text_differs(o: str, r: str) -> bool:
+    if o == r:
+        return False
+    ot, rt = _word_level_tokens(o), _word_level_tokens(r)
+    for tag, *_ in difflib.SequenceMatcher(None, ot, rt, autojunk=False).get_opcodes():
+        if tag != "equal":
+            return True
+    return False
 
 
 def _structural_block_elements(container: ET.Element) -> list[ET.Element]:
@@ -214,13 +227,7 @@ def _replace_toc_paragraph_with_del_preserving_layout(
 def _paragraph_needs_revision(orig: BodyParagraph, rev: BodyParagraph, config: CompareConfig) -> bool:
     o = _concat_paragraph_text(orig, config)
     r = _concat_paragraph_text(rev, config)
-    if o == r:
-        return False
-    ot, rt = _word_level_tokens(o), _word_level_tokens(r)
-    for tag, *_ in difflib.SequenceMatcher(None, ot, rt, autojunk=False).get_opcodes():
-        if tag != "equal":
-            return True
-    return False
+    return _token_level_text_differs(o, r)
 
 
 def _next_id(counter: list[int]) -> str:
@@ -502,19 +509,16 @@ def _emit_word_token_track_change_fragment(
     return out
 
 
-def build_paragraph_track_change_elements(
-    original: BodyParagraph,
-    revised: BodyParagraph,
-    config: CompareConfig,
+def _track_change_elements_for_concat_texts(
+    orig_text: str,
+    rev_text: str,
     *,
     id_counter: list[int],
     author: str,
     date_iso: str,
 ) -> list[ET.Element]:
-    """Return ordered ``w:r`` / ``w:ins`` / ``w:del`` children for one ``w:p``."""
+    """Word/whitespace token diff → ``w:r`` / ``w:ins`` / ``w:del`` (shared by paragraph + TOC paths)."""
 
-    orig_text = _concat_paragraph_text(original, config)
-    rev_text = _concat_paragraph_text(revised, config)
     orig_tokens = _word_level_tokens(orig_text)
     rev_tokens = _word_level_tokens(rev_text)
     matcher = difflib.SequenceMatcher(None, orig_tokens, rev_tokens, autojunk=False)
@@ -558,6 +562,77 @@ def build_paragraph_track_change_elements(
                 )
 
     return out
+
+
+def build_paragraph_track_change_elements(
+    original: BodyParagraph,
+    revised: BodyParagraph,
+    config: CompareConfig,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element]:
+    """Return ordered ``w:r`` / ``w:ins`` / ``w:del`` children for one ``w:p``."""
+
+    orig_text = _concat_paragraph_text(original, config)
+    rev_text = _concat_paragraph_text(revised, config)
+    return _track_change_elements_for_concat_texts(
+        orig_text,
+        rev_text,
+        id_counter=id_counter,
+        author=author,
+        date_iso=date_iso,
+    )
+
+
+def _concat_paragraph_text_toc_track_layout(
+    paragraph: BodyParagraph, config: CompareConfig
+) -> str:
+    """
+    TOC ``w:pStyle`` lines: keep ``\\t`` from runs while still honoring *ignore_case*.
+
+    Global *ignore_whitespace* collapses tabs to a space and breaks TOC layout (SCRUM-112).
+    Used only by :func:`_build_toc_matched_line_track_change_elements`.
+    """
+
+    cfg = dict(config)
+    cfg["ignore_whitespace"] = False
+    return "".join(
+        _normalize_text(str(run.get("text", "")), cfg) for run in paragraph.get("runs", [])
+    )
+
+
+def _toc_matched_line_needs_revision(
+    orig: BodyParagraph, rev: BodyParagraph, config: CompareConfig
+) -> bool:
+    """Whether a matched TOC line pair needs track markup (tab-preserving concat)."""
+
+    o = _concat_paragraph_text_toc_track_layout(orig, config)
+    r = _concat_paragraph_text_toc_track_layout(rev, config)
+    return _token_level_text_differs(o, r)
+
+
+def _build_toc_matched_line_track_change_elements(
+    original: BodyParagraph,
+    revised: BodyParagraph,
+    config: CompareConfig,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element]:
+    """Track Changes for two aligned TOC paragraphs (``TOC*`` style), preserving tab leaders."""
+
+    orig_text = _concat_paragraph_text_toc_track_layout(original, config)
+    rev_text = _concat_paragraph_text_toc_track_layout(revised, config)
+    return _track_change_elements_for_concat_texts(
+        orig_text,
+        rev_text,
+        id_counter=id_counter,
+        author=author,
+        date_iso=date_iso,
+    )
 
 
 def _apply_track_changes_to_structural_container(
@@ -607,16 +682,28 @@ def _apply_track_changes_to_structural_container(
                 continue
             orig_para: BodyParagraph = oblock  # type: ignore[assignment]
             rev_para: BodyParagraph = rblock  # type: ignore[assignment]
-            if not _paragraph_needs_revision(orig_para, rev_para, config):
-                continue
-            new_kids = build_paragraph_track_change_elements(
-                orig_para,
-                rev_para,
-                config,
-                id_counter=id_counter,
-                author=author,
-                date_iso=date_iso,
-            )
+            if _paragraph_style_is_toc(el):
+                if not _toc_matched_line_needs_revision(orig_para, rev_para, config):
+                    continue
+                new_kids = _build_toc_matched_line_track_change_elements(
+                    orig_para,
+                    rev_para,
+                    config,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
+            else:
+                if not _paragraph_needs_revision(orig_para, rev_para, config):
+                    continue
+                new_kids = build_paragraph_track_change_elements(
+                    orig_para,
+                    rev_para,
+                    config,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
             _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is not None and rj is None:
             if oi >= len(block_els):
