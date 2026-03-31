@@ -26,7 +26,7 @@ def _paragraph_block(text: str) -> dict:
 
 
 def test_ins_del_include_w_id_author_date() -> None:
-    # Word-level tokens: "a" vs "ab" → replace token → del "a" then ins "ab" (ids 1, 2).
+    # Single-token replace keeps common prefix "a" unchanged and inserts only "b".
     ins_els = build_paragraph_track_change_elements(
         _paragraph_block("a"),
         _paragraph_block("ab"),
@@ -36,9 +36,11 @@ def test_ins_del_include_w_id_author_date() -> None:
         date_iso="2026-03-27T15:00:00Z",
     )
     ins_nodes = [e for e in ins_els if _local_name(e.tag) == "ins"]
+    del_nodes = [e for e in ins_els if _local_name(e.tag) == "del"]
     assert len(ins_nodes) == 1
+    assert len(del_nodes) == 0
     ins = ins_nodes[0]
-    assert ins.get(f"{{{WORD_NS}}}id") == "2"
+    assert ins.get(f"{{{WORD_NS}}}id") == "1"
     assert ins.get(f"{{{WORD_NS}}}author") == "MetaAuthor"
     assert ins.get(f"{{{WORD_NS}}}date") == "2026-03-27T15:00:00Z"
 
@@ -53,7 +55,7 @@ def test_ins_del_include_w_id_author_date() -> None:
     del_nodes = [e for e in del_els if _local_name(e.tag) == "del"]
     ins2 = [e for e in del_els if _local_name(e.tag) == "ins"]
     assert len(del_nodes) == 1
-    assert len(ins2) == 1
+    assert len(ins2) == 0
     d = del_nodes[0]
     assert d.get(f"{{{WORD_NS}}}id") == "1"
     assert d.get(f"{{{WORD_NS}}}author") == "DelAuthor"
@@ -112,7 +114,8 @@ def test_header_part_receives_ins_when_header_text_changes(tmp_path: Path) -> No
     assert ins_list[0].get(f"{{{WORD_NS}}}date") == "2026-03-27T18:00:00Z"
     assert ins_list[0].get(f"{{{WORD_NS}}}id") is not None
     t_parts = [t.text or "" for t in ins_list[0].findall(".//w:t", NS)]
-    assert "".join(t_parts) == "HdrNew"
+    # Shared prefix "Hdr" remains plain text; only changed core is inserted.
+    assert "".join(t_parts) == "New"
 
 
 def test_w_ids_unique_across_document_and_header(tmp_path: Path) -> None:
@@ -147,12 +150,12 @@ def test_w_ids_unique_across_document_and_header(tmp_path: Path) -> None:
         doc_ids = collect_revision_ids(zf.read("word/document.xml"))
         hdr_ids = collect_revision_ids(zf.read("word/header1.xml"))
 
-    assert sorted(doc_ids + hdr_ids) == ["1", "2", "3", "4"]
+    assert sorted(doc_ids + hdr_ids) == ["1", "2"]
 
     doc_root = load_word_document_xml_root(out)
     doc_ins = doc_root.findall(".//w:ins", NS)
     assert len(doc_ins) == 1
-    assert doc_ins[0].get(f"{{{WORD_NS}}}id") == "2"
+    assert doc_ins[0].get(f"{{{WORD_NS}}}id") == "1"
 
 
 def _docx_with_body_and_footer(

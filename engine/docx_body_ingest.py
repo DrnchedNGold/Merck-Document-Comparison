@@ -58,23 +58,36 @@ def load_word_document_xml_root(docx_path: Union[str, Path]) -> ET.Element:
     return ET.fromstring(document_xml)
 
 
-def _run_text_from_w_r(r: ET.Element) -> str:
-    """Ordered text + tab markers from one ``w:r`` (direct children only)."""
+def _parse_text_from_run_element(r: ET.Element) -> str:
+    """
+    Ordered text content of one ``w:r`` (direct children only).
+
+    Word often separates labels from values with ``w:tab`` rather than spaces; the
+    previous ingest only read ``w:t`` nodes and dropped tabs, so IR concatenation
+    merged tokens (e.g. ``Version Number:`` + ``2.0`` → ``Version Number:2.0``).
+    """
 
     parts: list[str] = []
     for child in r:
         ln = _local_name(child.tag)
-        if ln == "t" and child.text:
-            parts.append(child.text)
-        elif ln == "tab":
+        if ln == "rPr":
+            continue
+        if ln == "t":
+            if child.text is not None:
+                parts.append(child.text)
+        elif ln in ("tab", "ptab"):
             parts.append("\t")
+        elif ln == "br":
+            parts.append("\n")
+        elif ln == "cr":
+            parts.append("\r")
     return "".join(parts)
 
 
 def _parse_runs_from_paragraph(p: ET.Element) -> list[BodyRun]:
     runs: list[BodyRun] = []
     for r in p.findall(".//w:r", NS):
-        run_text = _run_text_from_w_r(r)
+        run_text = _parse_text_from_run_element(r)
         if run_text:
             runs.append({"text": run_text})
     return runs
@@ -143,8 +156,8 @@ def parse_docx_body_ir(docx_path: Union[str, Path]) -> BodyIR:
     - Block order follows direct children of `w:body` (`w:p`, `w:tbl`, ...).
     - Paragraph `id` values are assigned in document reading order (including
       paragraphs inside table cells).
-    - Each run's text is the concatenation of `w:t` text and ``\\t`` for each direct
-      child ``w:tab`` under `w:r`, in document order.
+    - Each run's text is the concatenation of ordered content under `w:r`:
+      `w:t` text, `w:tab` / `w:ptab` as ``\\t``, `w:br` as ``\\n``, `w:cr` as ``\\r``.
     """
 
     root = load_word_document_xml_root(docx_path)
