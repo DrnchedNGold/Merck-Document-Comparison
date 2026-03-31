@@ -160,3 +160,35 @@ def test_parse_document_package_loads_footer_body_ir(tmp_path: Path) -> None:
     pkg = parse_docx_document_package(p)
     assert "word/footer1.xml" in pkg["header_footer"]
     assert pkg["header_footer"]["word/footer1.xml"]["blocks"][0]["runs"][0]["text"] == "Foot"
+
+
+def test_header_preserves_tab_between_label_and_value(tmp_path: Path) -> None:
+    """Ensure a header paragraph with a w:tab run preserves a separate '\t' run."""
+    doc = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{WORD_NS}"><w:body></w:body></w:document>
+"""
+    # Header: label, tab run, value
+    hdr = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="{WORD_NS}">
+  <w:p>
+    <w:r><w:t>Version Number:</w:t></w:r>
+    <w:r><w:tab/></w:r>
+    <w:r><w:t>2.0</w:t></w:r>
+  </w:p>
+</w:hdr>
+"""
+    p = _docx(tmp_path, document_xml=doc, extra_entries={"word/header1.xml": hdr})
+    pkg = parse_docx_document_package(p)
+    assert "word/header1.xml" in pkg["header_footer"]
+    runs = pkg["header_footer"]["word/header1.xml"]["blocks"][0]["runs"]
+    texts = [r["text"] for r in runs]
+    # Expect three runs: label, tab, value
+    assert texts == ["Version Number:", "\t", "2.0"]
+
+
+def test_normalize_whitespace_preserves_single_space_for_tab() -> None:
+    from engine.compare_keys import _normalize_whitespace
+
+    assert _normalize_whitespace("\t") == " "
+    assert _normalize_whitespace("  \n\t ") == " "
+    assert _normalize_whitespace("a   b") == "a b"

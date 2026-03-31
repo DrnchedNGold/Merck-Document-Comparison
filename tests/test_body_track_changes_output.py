@@ -60,6 +60,100 @@ def test_build_paragraph_track_change_insert_has_ins_with_t() -> None:
     assert _collect_t_text(ins[0]) == " world"
 
 
+def test_build_paragraph_track_change_preserves_tab_between_label_and_value() -> None:
+    """SCRUM-105: metadata lines use tabs; only changing the value must keep the gap."""
+    orig = _paragraph_block("Version Number:\t1.0")
+    rev = _paragraph_block("Version Number:\t2.0")
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-03-29T00:00:00Z",
+    )
+    plain_r_text = "".join(
+        _collect_t_text(e) for e in els if _local_name(e.tag) == "r"
+    )
+    p_xml = ET.Element(f"{{{WORD_NS}}}p")
+    for el in els:
+        p_xml.append(el)
+    assert len(p_xml.findall(".//w:tab", NS)) >= 1
+    assert "Version Number:" in plain_r_text
+    assert "Version Number:2" not in plain_r_text
+
+
+def test_build_paragraph_track_change_split_tab_run_with_ignore_whitespace() -> None:
+    """SCRUM-105: tab-only runs must not disappear when ignore_whitespace=True."""
+    cfg = dict(DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    cfg["ignore_whitespace"] = True
+
+    orig = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [
+            {"text": "Version Number:"},
+            {"text": "\t"},
+            {"text": "1.0"},
+        ],
+    }
+    rev = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [
+            {"text": "Version Number:"},
+            {"text": "\t"},
+            {"text": "2.0"},
+        ],
+    }
+
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        cfg,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-03-30T00:00:00Z",
+    )
+
+    plain_r_text = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    del_text = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    ins_text = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "ins")
+
+    assert "Version Number: " in plain_r_text
+    assert "Version Number:2" not in plain_r_text
+    assert ".0" in plain_r_text
+    assert del_text == "1"
+    assert ins_text == "2"
+
+
+def test_build_paragraph_track_change_preserves_unchanged_date_year_suffix() -> None:
+    """SCRUM-105: only changed date core should be revised; -2025 remains unchanged."""
+    orig = _paragraph_block("Release Date:\t09-APR-2025")
+    rev = _paragraph_block("Release Date:\t30-MAY-2025")
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-03-30T00:00:00Z",
+    )
+
+    plain_r_text = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    del_text = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    ins_text = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "ins")
+
+    p_xml = ET.Element(f"{{{WORD_NS}}}p")
+    for el in els:
+        p_xml.append(el)
+    assert len(p_xml.findall(".//w:tab", NS)) >= 1
+    assert "Release Date:" in plain_r_text
+    assert "-2025" in plain_r_text
+    assert del_text == "09-APR"
+    assert ins_text == "30-MAY"
+
+
 def test_build_paragraph_track_change_delete_has_del_with_del_text() -> None:
     orig = _paragraph_block("Hello world")
     rev = _paragraph_block("Hello")

@@ -304,6 +304,58 @@ def _w_ins_segment(text: str, ins_id: str, author: str, date_iso: str) -> ET.Ele
     return ins_el
 
 
+def _emit_single_token_replace_fragment(
+    before: str,
+    after: str,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element]:
+    """
+    Emit a fine-grained replacement for single-token spans.
+
+    Preserves shared prefix/suffix as plain runs so only true differences are
+    wrapped in w:del / w:ins (for example, ``1.0`` -> ``2.0`` keeps ``.0``).
+    """
+
+    if before == after:
+        return [_w_run_single_t(before)] if before else []
+
+    if not before:
+        return [_w_ins_segment(after, _next_id(id_counter), author, date_iso)] if after else []
+    if not after:
+        return [_w_del_segment(before, _next_id(id_counter), author, date_iso)]
+
+    min_len = min(len(before), len(after))
+    prefix_len = 0
+    while prefix_len < min_len and before[prefix_len] == after[prefix_len]:
+        prefix_len += 1
+
+    max_suffix = min_len - prefix_len
+    suffix_len = 0
+    while suffix_len < max_suffix and before[-(suffix_len + 1)] == after[-(suffix_len + 1)]:
+        suffix_len += 1
+
+    prefix = before[:prefix_len]
+    before_mid_end = len(before) - suffix_len if suffix_len else len(before)
+    after_mid_end = len(after) - suffix_len if suffix_len else len(after)
+    before_mid = before[prefix_len:before_mid_end]
+    after_mid = after[prefix_len:after_mid_end]
+    suffix = before[-suffix_len:] if suffix_len else ""
+
+    out: list[ET.Element] = []
+    if prefix:
+        out.append(_w_run_single_t(prefix))
+    if before_mid:
+        out.append(_w_del_segment(before_mid, _next_id(id_counter), author, date_iso))
+    if after_mid:
+        out.append(_w_ins_segment(after_mid, _next_id(id_counter), author, date_iso))
+    if suffix:
+        out.append(_w_run_single_t(suffix))
+    return out
+
+
 def _replace_span_is_multi_token(before: str, after: str) -> bool:
     """True when the replaced text spans more than one word token or includes spaces."""
     if not before and not after:
@@ -428,10 +480,15 @@ def _emit_word_token_track_change_fragment(
             b = "".join(ot[i1:i2])
             a = "".join(rt[j1:j2])
             if not _replace_span_is_multi_token(b, a):
-                if b:
-                    out.append(_w_del_segment(b, _next_id(id_counter), author, date_iso))
-                if a:
-                    out.append(_w_ins_segment(a, _next_id(id_counter), author, date_iso))
+                out.extend(
+                    _emit_single_token_replace_fragment(
+                        b,
+                        a,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                )
             else:
                 out.extend(
                     _emit_word_only_track_change_fragment(
@@ -490,10 +547,15 @@ def build_paragraph_track_change_elements(
                     )
                 )
             else:
-                if before:
-                    out.append(_w_del_segment(before, _next_id(id_counter), author, date_iso))
-                if after:
-                    out.append(_w_ins_segment(after, _next_id(id_counter), author, date_iso))
+                out.extend(
+                    _emit_single_token_replace_fragment(
+                        before,
+                        after,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                )
 
     return out
 

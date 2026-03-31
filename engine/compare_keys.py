@@ -19,8 +19,13 @@ class CompareKey(TypedDict):
 
 
 def _normalize_whitespace(text: str) -> str:
-    # Collapse all whitespace sequences to single spaces.
-    return " ".join(text.split())
+    # Collapse all whitespace sequences to a single ASCII space while preserving
+    # at least one space for runs that contain only tabs/newlines. Using
+    # regex preserves a single space for inputs like "\t" (previous
+    # implementation returned an empty string for such inputs).
+    import re
+
+    return re.sub(r"\s+", " ", text)
 
 
 def _normalize_text(text: str, config: CompareConfig) -> str:
