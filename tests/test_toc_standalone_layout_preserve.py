@@ -163,6 +163,60 @@ def test_reported_diversity_fixture_toc_revisions_line_preserves_tab(tmp_path: P
     assert _collect_t_text(ins).startswith("TABLE OF REVISIONS")
 
 
+def test_reported_diversity_fixture_toc_effort_page_number_not_merged(tmp_path: Path) -> None:
+    """
+    SCRUM-113: when only the TOC page number changes, the last word must not merge with the number.
+
+    Specifically, we must not emit a single deletion like ``EFFORT6``; instead the separator
+    (typically ``w:tab`` / dot leader) remains and only the numeric page marker is revised.
+    """
+
+    base = Path(__file__).resolve().parent.parent / "sample-docs" / "email1docs"
+    v1 = base / "diversity-plan-bladder-cancer-version1.docx"
+    v2 = base / "diversity-plan-bladder-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("sample diversity fixtures not present")
+
+    out = tmp_path / "diversity_toc_effort_page_out.docx"
+    emit_docx_with_body_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        date_iso="2026-03-30T12:00:00Z",
+    )
+    root = load_word_document_xml_root(out)
+
+    found = False
+    for p in root.findall(".//w:body/w:p", NS):
+        # Only check TOC paragraphs (Word uses TOC1/TOC2/TOC3 styles).
+        ppr = p.find("w:pPr", NS)
+        if ppr is None:
+            continue
+        ps = ppr.find("w:pStyle", NS)
+        val = (ps.get(f"{{{WORD_NS}}}val") if ps is not None else "") or ""
+        if not val.upper().startswith("TOC"):
+            continue
+
+        flat = "".join(t.text for t in p.findall(".//w:t", NS) if t.text)
+        if "EXECUTIVE SUMMARY OF THE SPONSOR" not in flat:
+            continue
+
+        # Anchor: ensure the structural separator exists and the deleted chunk is numeric-only.
+        if p.find(".//w:tab", NS) is None:
+            continue
+        dels = [_collect_del_text(d) for d in p.findall(".//w:del", NS)]
+        if not dels:
+            continue
+        # Fail hard if we ever collapse into a single merged deletion.
+        assert not any("EFFORT" in d for d in dels), f"merged deletion seen: {dels!r}"
+        assert any(d.strip().isdigit() for d in dels), f"expected numeric-only delText, got: {dels!r}"
+        found = True
+        break
+
+    assert found, "expected TOC entry for EXECUTIVE SUMMARY ... EFFORT with a revised page number"
+
+
 TOC2_ENTRY_XML = """
 <w:p>
   <w:pPr><w:pStyle w:val="TOC2"/></w:pPr>
