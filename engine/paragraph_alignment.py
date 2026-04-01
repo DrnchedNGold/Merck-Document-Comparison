@@ -209,6 +209,42 @@ def _blocks_align_in_lcs(
     return ok
 
 
+def alignment_for_track_changes_emit(
+    original: BodyIR, revised: BodyIR, config: CompareConfig
+) -> list[ParagraphAlignment]:
+    """
+    Block alignment for :mod:`engine.body_revision_emit` Track Changes output.
+
+    When both bodies have the same number of blocks and the block **types** match
+    at every index (``paragraph`` with ``paragraph``, ``table`` with ``table``),
+    pair ``(i, i)``. That matches the emit path used before SCRUM-115 table work
+    and keeps paragraph diff localization stable for large protocols (golden
+    ins/del counts).
+
+    When counts match but **any** index has mismatched types—e.g. ``w:p`` in the
+    original and ``w:tbl`` in the revised at the same slot—delegate to
+    :func:`align_paragraphs` so LCS can insert, delete, or match blocks without
+    dropping revised tables.
+
+    :func:`align_paragraphs` remains the single source of truth for LCS/fuzzy
+    logic (inline diff, reorder tests, etc.); this helper only selects the
+    pairing strategy for OOXML emit.
+    """
+
+    orig_blocks = original.get("blocks", [])
+    rev_blocks = revised.get("blocks", [])
+    if len(orig_blocks) != len(rev_blocks):
+        return align_paragraphs(original, revised, config)
+    if not orig_blocks:
+        return []
+    if all(
+        orig_blocks[i].get("type") == rev_blocks[i].get("type")
+        for i in range(len(orig_blocks))
+    ):
+        return [ParagraphAlignment(i, i) for i in range(len(orig_blocks))]
+    return align_paragraphs(original, revised, config)
+
+
 def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -> list[ParagraphAlignment]:
     """
     Align paragraphs using a stable, deterministic strategy.

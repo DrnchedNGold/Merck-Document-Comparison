@@ -45,7 +45,7 @@ from typing import Union
 from .compare_keys import _normalize_text
 from .contracts import BodyIR, BodyParagraph, CompareConfig
 from .document_package import parse_docx_document_package
-from .paragraph_alignment import align_paragraphs
+from .paragraph_alignment import alignment_for_track_changes_emit
 from .docx_body_ingest import WORD_NAMESPACE
 from .docx_output_package import write_docx_copy_with_part_replacements
 from .docx_package_parts import (
@@ -747,12 +747,10 @@ def _apply_track_changes_to_structural_container(
     ob = original_ir.get("blocks", [])
     rb = revised_ir.get("blocks", [])
 
-    # Always run :func:`align_paragraphs` (LCS + fuzzy paragraph matching). Index-only
-    # pairing when ``len(ob) == len(rb)`` was unsafe: a ``w:tbl`` in the revised doc
-    # can sit at the same block index as a ``w:p`` in the original (equal-length
-    # bodies). Emit skipped non-paragraph pairs and left the original paragraph in
-    # place, dropping the revised table from the output (SCRUM-115).
-    alignment = align_paragraphs(original_ir, revised_ir, config)
+    # Use :func:`alignment_for_track_changes_emit`: index ``(i,i)`` when counts and
+    # per-index types match (stable golden counts); full LCS when types diverge
+    # (paragraph vs table at the same slot, SCRUM-115).
+    alignment = alignment_for_track_changes_emit(original_ir, revised_ir, config)
     empty_rev = _empty_body_paragraph()
 
     for step_i, al in enumerate(alignment):
