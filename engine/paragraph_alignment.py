@@ -76,6 +76,22 @@ def _toc_section_prefix_for_alignment(txt: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _diagonal_prefix_anchor(o_txt: str, r_txt: str) -> bool:
+    """
+    True when same-slot bodies look like an in-place grow/shrink (prefix/suffix),
+    not a different sentence. Used only for diagonal ``(i,i)`` paragraph pairs
+    when fuzzy gates fail (e.g. ``Hi`` vs ``Hi there``).
+    """
+
+    o_st, r_st = o_txt.strip(), r_txt.strip()
+    if not o_st or not r_st:
+        return o_st == r_st
+    if o_st == r_st:
+        return True
+    shorter, longer = (o_st, r_st) if len(o_st) <= len(r_st) else (r_st, o_st)
+    return longer.startswith(shorter)
+
+
 def _toc_slot_pair_relaxed_align(o_txt: str, r_txt: str) -> bool:
     """
     True when both lines look like TOC entries with the same section number and
@@ -150,6 +166,7 @@ def _blocks_align_in_lcs(
     o_txts: list[str],
     r_txts: list[str],
     cache: dict[tuple[int, int], bool],
+    skip_length_ratio: bool = False,
 ) -> bool:
     if o_sig == r_sig:
         return True
@@ -168,7 +185,12 @@ def _blocks_align_in_lcs(
         cache[key] = True
         return True
     lo, lr = len(o_txt), len(r_txt)
-    if lo and lr and min(lo, lr) / max(lo, lr) < 0.45:
+    if (
+        not skip_length_ratio
+        and lo
+        and lr
+        and min(lo, lr) / max(lo, lr) < 0.45
+    ):
         cache[key] = False
         return False
     if _toc_slot_pair_relaxed_align(o_txt, r_txt):
@@ -196,6 +218,11 @@ def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -
     - LCS dynamic programming: match when signatures are equal **or** fuzzy
       similarity is high enough (``quick_ratio`` plus combined character/token
       ratio; edited same paragraph across unequal-length bodies).
+    - Block types must match for any pair; mixed pairs never align.
+    - When both bodies have the same number of blocks, diagonal ``(i,i)``
+      uses: signature equality; fuzzy match with relaxed length ratio; prefix
+      anchor for obvious in-place paragraph edits; or always for two tables.
+      Off-diagonal pairs use standard fuzzy matching (reorders).
     - Emit a full alignment list including inserts/deletes as (None, idx) / (idx, None).
     """
 
@@ -211,6 +238,41 @@ def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -
     align_cache: dict[tuple[int, int], bool] = {}
 
     def aligned(oi: int, rj: int) -> bool:
+        # Never pair a table block with a paragraph (or any mixed types). Fuzzy
+        # text vs table signature could otherwise align the wrong rows and emit
+        # skips the revised table while leaving a paragraph in place (SCRUM-115).
+        if orig_blocks[oi].get("type") != rev_blocks[rj].get("type"):
+            return False
+        if m == n and oi == rj:
+            if (
+                m == 1
+                and orig_blocks[oi].get("type") == "paragraph"
+                and rev_blocks[rj].get("type") == "paragraph"
+            ):
+                return True
+            if orig_blocks[oi].get("type") == "table":
+                return True
+            if orig_sigs[oi] == rev_sigs[rj]:
+                return True
+            if _blocks_align_in_lcs(
+                original,
+                revised,
+                oi,
+                rj,
+                orig_sigs[oi],
+                rev_sigs[rj],
+                config,
+                m=m,
+                n=n,
+                o_txts=o_txts,
+                r_txts=r_txts,
+                cache=align_cache,
+                skip_length_ratio=True,
+            ):
+                return True
+            if _diagonal_prefix_anchor(o_txts[oi], r_txts[rj]):
+                return True
+            return False
         return _blocks_align_in_lcs(
             original,
             revised,
@@ -224,6 +286,7 @@ def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -
             o_txts=o_txts,
             r_txts=r_txts,
             cache=align_cache,
+            skip_length_ratio=False,
         )
 
     # LCS DP table.

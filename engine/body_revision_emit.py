@@ -45,7 +45,7 @@ from typing import Union
 from .compare_keys import _normalize_text
 from .contracts import BodyIR, BodyParagraph, CompareConfig
 from .document_package import parse_docx_document_package
-from .paragraph_alignment import ParagraphAlignment, align_paragraphs
+from .paragraph_alignment import align_paragraphs
 from .docx_body_ingest import WORD_NAMESPACE
 from .docx_output_package import write_docx_copy_with_part_replacements
 from .docx_package_parts import (
@@ -54,6 +54,7 @@ from .docx_package_parts import (
     discover_header_footer_part_paths_from_namelist,
 )
 from .ooxml_namespace import serialize_ooxml_part
+from .table_diff import _cell_concat_paragraph, _table_shape
 
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 NS = {"w": WORD_NAMESPACE}
@@ -635,6 +636,100 @@ def _build_toc_matched_line_track_change_elements(
     )
 
 
+def _tc_direct_paragraph_elements(tc: ET.Element) -> list[ET.Element]:
+    return [c for c in tc if _local_name(c.tag) == "p"]
+
+
+def _tbl_tr_elements(tbl: ET.Element) -> list[ET.Element]:
+    return [c for c in tbl if _local_name(c.tag) == "tr"]
+
+
+def _replace_body_child_element(container: ET.Element, old: ET.Element, new: ET.Element) -> None:
+    idx = list(container).index(old)
+    container.remove(old)
+    container.insert(idx, new)
+
+
+def _w_ins_wrap_block_content(
+    inner: ET.Element,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> ET.Element:
+    """Block-level insert wrapper (e.g. a ``w:tbl`` only in the revised document)."""
+
+    ins_el = ET.Element(
+        f"{{{WORD_NAMESPACE}}}ins",
+        {
+            f"{{{WORD_NAMESPACE}}}id": _next_id(id_counter),
+            f"{{{WORD_NAMESPACE}}}author": author,
+            f"{{{WORD_NAMESPACE}}}date": date_iso,
+        },
+    )
+    ins_el.append(inner)
+    return ins_el
+
+
+def _apply_matched_table_track_changes(
+    container: ET.Element,
+    tbl_el: ET.Element,
+    orig_table: dict,
+    rev_table: dict,
+    config: CompareConfig,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+    *,
+    revised_tbl_el: ET.Element | None,
+) -> None:
+    """
+    Preserve table grid while applying per-cell Track Changes, matching
+    :func:`table_diff.diff_table_blocks` cell merge semantics. On row/column
+    shape mismatch, replace the original ``w:tbl`` with a copy of the revised
+    table when OOXML is available.
+    """
+
+    if _table_shape(orig_table) != _table_shape(rev_table):
+        if revised_tbl_el is not None:
+            _replace_body_child_element(
+                container, tbl_el, copy.deepcopy(revised_tbl_el)
+            )
+        return
+
+    tr_els = _tbl_tr_elements(tbl_el)
+    rows_o = orig_table.get("rows", [])
+    rows_r = rev_table.get("rows", [])
+    for r, row_o in enumerate(rows_o):
+        if r >= len(tr_els) or r >= len(rows_r):
+            break
+        row_r = rows_r[r]
+        tcs = [c for c in tr_els[r] if _local_name(c.tag) == "tc"]
+        for c, cell_o in enumerate(row_o):
+            if c >= len(tcs) or c >= len(row_r):
+                break
+            cell_r = row_r[c]
+            tc_el = tcs[c]
+            paras = _tc_direct_paragraph_elements(tc_el)
+            if not paras:
+                continue
+            orig_para = _cell_concat_paragraph(cell_o)
+            rev_para = _cell_concat_paragraph(cell_r)
+            if not _paragraph_needs_revision(orig_para, rev_para, config):
+                continue
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+            _replace_p_content_preserving_p_pr(paras[0], new_kids)
+            for extra in paras[1:]:
+                tc_el.remove(extra)
+
+
 def _apply_track_changes_to_structural_container(
     container: ET.Element,
     original_ir: BodyIR,
@@ -652,19 +747,12 @@ def _apply_track_changes_to_structural_container(
     ob = original_ir.get("blocks", [])
     rb = revised_ir.get("blocks", [])
 
-    # Always run LCS alignment when A/B block counts differ. A legacy branch used to
-    # return early with index-only pairing when ``len(block_els) != len(ob)``, which
-    # skipped :func:`align_paragraphs` entirely—so real docs (extra paragraph in B,
-    # slightly different OOXML shape) never got fuzzy-matched paragraphs and showed
-    # whole-paragraph delete/insert instead of in-place word revisions.
-
-    # Same block count: pair by index so in-place text edits (e.g. ``Hi`` → ``Hi there``)
-    # stay one paragraph with word-level ins/del. When counts differ, LCS finds inserted /
-    # deleted paragraphs (lines only in A or only in B).
-    if len(ob) == len(rb):
-        alignment = [ParagraphAlignment(i, i) for i in range(len(ob))]
-    else:
-        alignment = align_paragraphs(original_ir, revised_ir, config)
+    # Always run :func:`align_paragraphs` (LCS + fuzzy paragraph matching). Index-only
+    # pairing when ``len(ob) == len(rb)`` was unsafe: a ``w:tbl`` in the revised doc
+    # can sit at the same block index as a ``w:p`` in the original (equal-length
+    # bodies). Emit skipped non-paragraph pairs and left the original paragraph in
+    # place, dropping the revised table from the output (SCRUM-115).
+    alignment = align_paragraphs(original_ir, revised_ir, config)
     empty_rev = _empty_body_paragraph()
 
     for step_i, al in enumerate(alignment):
@@ -676,6 +764,28 @@ def _apply_track_changes_to_structural_container(
                 continue
             oblock, rblock = ob[oi], rb[rj]
             el = block_els[oi]
+            if oblock.get("type") == "table" and rblock.get("type") == "table":
+                if _local_name(el.tag) != "tbl":
+                    continue
+                rev_tbl: ET.Element | None = None
+                if (
+                    revised_block_elements is not None
+                    and rj < len(revised_block_elements)
+                    and _local_name(revised_block_elements[rj].tag) == "tbl"
+                ):
+                    rev_tbl = revised_block_elements[rj]
+                _apply_matched_table_track_changes(
+                    container,
+                    el,
+                    oblock,
+                    rblock,
+                    config,
+                    id_counter,
+                    author,
+                    date_iso,
+                    revised_tbl_el=rev_tbl,
+                )
+                continue
             if oblock.get("type") != "paragraph" or rblock.get("type") != "paragraph":
                 continue
             if _local_name(el.tag) != "p":
@@ -710,6 +820,10 @@ def _apply_track_changes_to_structural_container(
                 continue
             oblock = ob[oi]
             el = block_els[oi]
+            if oblock.get("type") == "table":
+                if _local_name(el.tag) == "tbl":
+                    container.remove(el)
+                continue
             if oblock.get("type") != "paragraph":
                 continue
             if _local_name(el.tag) != "p":
@@ -736,14 +850,31 @@ def _apply_track_changes_to_structural_container(
                 _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is None and rj is not None:
             rblock = rb[rj]
+            idx = _body_insert_index_before_next_orig_block(
+                container, alignment, step_i, block_els
+            )
+            if rblock.get("type") == "table":
+                rev_tbl_el: ET.Element | None = None
+                if (
+                    revised_block_elements is not None
+                    and rj < len(revised_block_elements)
+                    and _local_name(revised_block_elements[rj].tag) == "tbl"
+                ):
+                    rev_tbl_el = revised_block_elements[rj]
+                if rev_tbl_el is not None:
+                    wrapped = _w_ins_wrap_block_content(
+                        copy.deepcopy(rev_tbl_el),
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                    container.insert(idx, wrapped)
+                continue
             if rblock.get("type") != "paragraph":
                 continue
             rev_para = rblock  # type: ignore[assignment]
             if not _paragraph_needs_revision(empty_rev, rev_para, config):
                 continue
-            idx = _body_insert_index_before_next_orig_block(
-                container, alignment, step_i, block_els
-            )
             rev_el: ET.Element | None = None
             if (
                 revised_block_elements is not None

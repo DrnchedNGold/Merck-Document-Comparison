@@ -343,6 +343,44 @@ def test_emit_docx_fixture_delete_xml_markers(tmp_path: Path) -> None:
     assert _collect_del_text(dels[0]) == " there"
 
 
+def test_emit_preserves_table_equal_block_count_paragraph_vs_table_slot(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-115: same-length bodies must not drop a revised table at a filler paragraph index."""
+    orig_inner = """
+<w:p><w:r><w:t>HeaderA</w:t></w:r></w:p>
+<w:p><w:r><w:t>FillerPara</w:t></w:r></w:p>
+<w:p><w:r><w:t>FooterB</w:t></w:r></w:p>
+"""
+    rev_inner = """
+<w:p><w:r><w:t>HeaderA</w:t></w:r></w:p>
+<w:tbl><w:tr><w:tc><w:p><w:r><w:t>CellOne</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+<w:p><w:r><w:t>FooterB</w:t></w:r></w:p>
+"""
+    orig = _minimal_docx(tmp_path, orig_inner, "orig_scrum115.docx")
+    rev = _minimal_docx(tmp_path, rev_inner, "rev_scrum115.docx")
+    out = tmp_path / "out_scrum115.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    assert len(root.findall(".//w:tbl", NS)) >= 1
+    assert "CellOne" in _collect_t_text(root)
+
+
+def test_emit_table_cell_text_change_has_revision_markers(tmp_path: Path) -> None:
+    """Matched tables get per-cell w:ins / w:del like paragraph inline diff."""
+    tbl = (
+        "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+    )
+    orig = _minimal_docx(tmp_path, tbl.format(text="oldcell"), "orig_cell.docx")
+    rev = _minimal_docx(tmp_path, tbl.format(text="newcell"), "rev_cell.docx")
+    out = tmp_path / "out_cell.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    assert len(root.findall(".//w:tbl", NS)) == 1
+    assert root.findall(".//w:ins", NS)
+    assert root.findall(".//w:del", NS)
+
+
 def test_write_docx_copy_with_part_replacements_overrides(tmp_path: Path) -> None:
     src = tmp_path / "src.docx"
     with zipfile.ZipFile(src, "w") as zf:
