@@ -69,6 +69,67 @@ class ParagraphAlignment:
     revised_paragraph_index: int | None
 
 
+def _repair_alignment_orig_table_rev_paras_then_rev_table(
+    alignment: list[ParagraphAlignment],
+    original: BodyIR,
+    revised: BodyIR,
+) -> list[ParagraphAlignment]:
+    """
+    When LCS emits an original-only ``w:tbl``, then revised-only paragraph(s), then a
+    revised-only ``w:tbl``, Track Changes emit would **remove** the original table and
+    **insert** the whole revised table inside one ``w:ins`` (purple block). Word-style
+    compare instead **matches** the two tables and applies cell-level revisions.
+
+    Rewire to: revised-only paragraph steps unchanged in order, then ``(oi, rj)``
+    **table–table** so :func:`engine.body_revision_emit._apply_matched_table_track_changes`
+    runs (SCRUM-120 follow-up).
+    """
+
+    ob = original.get("blocks", [])
+    rb = revised.get("blocks", [])
+    if not alignment:
+        return alignment
+    out: list[ParagraphAlignment] = []
+    i = 0
+    n = len(alignment)
+    while i < n:
+        al = alignment[i]
+        oi, rj = al.original_paragraph_index, al.revised_paragraph_index
+        repaired = False
+        if (
+            oi is not None
+            and rj is None
+            and oi < len(ob)
+            and ob[oi].get("type") == "table"
+        ):
+            j = i + 1
+            rev_only_mid: list[ParagraphAlignment] = []
+            while j < n:
+                a2 = alignment[j]
+                o2, r2 = a2.original_paragraph_index, a2.revised_paragraph_index
+                if o2 is not None:
+                    break
+                if r2 is None or r2 >= len(rb):
+                    break
+                br = rb[r2]
+                if br.get("type") == "table":
+                    out.extend(rev_only_mid)
+                    out.append(ParagraphAlignment(oi, r2))
+                    i = j + 1
+                    repaired = True
+                    break
+                if br.get("type") == "paragraph":
+                    rev_only_mid.append(a2)
+                    j += 1
+                    continue
+                break
+        if repaired:
+            continue
+        out.append(al)
+        i += 1
+    return out
+
+
 def _toc_section_prefix_for_alignment(txt: str) -> str | None:
     """Leading numbered section id (``1``, ``1.2.1``, …) or None if not TOC-shaped."""
 
@@ -234,7 +295,8 @@ def alignment_for_track_changes_emit(
     orig_blocks = original.get("blocks", [])
     rev_blocks = revised.get("blocks", [])
     if len(orig_blocks) != len(rev_blocks):
-        return align_paragraphs(original, revised, config)
+        al = align_paragraphs(original, revised, config)
+        return _repair_alignment_orig_table_rev_paras_then_rev_table(al, original, revised)
     if not orig_blocks:
         return []
     if all(
@@ -242,7 +304,8 @@ def alignment_for_track_changes_emit(
         for i in range(len(orig_blocks))
     ):
         return [ParagraphAlignment(i, i) for i in range(len(orig_blocks))]
-    return align_paragraphs(original, revised, config)
+    al = align_paragraphs(original, revised, config)
+    return _repair_alignment_orig_table_rev_paras_then_rev_table(al, original, revised)
 
 
 def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -> list[ParagraphAlignment]:

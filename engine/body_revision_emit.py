@@ -755,11 +755,21 @@ def _apply_track_changes_to_structural_container(
     alignment = alignment_for_track_changes_emit(original_ir, revised_ir, config)
     empty_rev = _empty_body_paragraph()
 
+    # Consecutive revised-only rows (None, rj0), (None, rj1), … share the same forward
+    # DOM anchor (next matched original block). Without an offset, each insert used the
+    # same index so later inserts appeared before earlier ones in document order — e.g.
+    # ``w:tbl`` before the preceding ``w:p`` when revised order is paragraph then table
+    # (SCRUM-120). Advance the index by how many nodes we already inserted at this anchor.
+    rev_insert_anchor_key: object | None = None
+    rev_insert_count = 0
+
     for step_i, al in enumerate(alignment):
         oi = al.original_paragraph_index
         rj = al.revised_paragraph_index
 
         if oi is not None and rj is not None:
+            rev_insert_anchor_key = None
+            rev_insert_count = 0
             if oi >= len(block_els):
                 continue
             oblock, rblock = ob[oi], rb[rj]
@@ -816,6 +826,8 @@ def _apply_track_changes_to_structural_container(
                 )
             _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is not None and rj is None:
+            rev_insert_anchor_key = None
+            rev_insert_count = 0
             if oi >= len(block_els):
                 continue
             oblock = ob[oi]
@@ -850,9 +862,19 @@ def _apply_track_changes_to_structural_container(
                 _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is None and rj is not None:
             rblock = rb[rj]
-            idx = _body_insert_index_before_next_orig_block(
+            next_oi = _next_alignment_original_block_index(alignment, step_i)
+            anchor_key: object
+            if next_oi is not None and next_oi < len(block_els):
+                anchor_key = ("oi", next_oi, id(container))
+            else:
+                anchor_key = ("sectpr", id(container))
+            if anchor_key != rev_insert_anchor_key:
+                rev_insert_anchor_key = anchor_key
+                rev_insert_count = 0
+            base = _body_insert_index_before_next_orig_block(
                 container, alignment, step_i, block_els
             )
+            idx = base + rev_insert_count
             if rblock.get("type") == "table":
                 rev_tbl_el: ET.Element | None = None
                 if (
@@ -869,6 +891,7 @@ def _apply_track_changes_to_structural_container(
                         date_iso=date_iso,
                     )
                     container.insert(idx, wrapped)
+                    rev_insert_count += 1
                 continue
             if rblock.get("type") != "paragraph":
                 continue
@@ -898,6 +921,17 @@ def _apply_track_changes_to_structural_container(
                     date_iso=date_iso,
                 )
             container.insert(idx, new_p)
+            rev_insert_count += 1
+
+
+def _next_alignment_original_block_index(alignment: list, step_index: int) -> int | None:
+    """First ``original_paragraph_index`` after *step_index* (exclusive), or ``None``."""
+
+    for k in range(step_index + 1, len(alignment)):
+        oi = alignment[k].original_paragraph_index
+        if oi is not None:
+            return oi
+    return None
 
 
 def _replace_p_content_preserving_p_pr(p_el: ET.Element, new_children: list[ET.Element]) -> None:

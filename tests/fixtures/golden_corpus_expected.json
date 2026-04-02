@@ -43,7 +43,7 @@
       "by_part": {
         "word/document.xml": {
           "del": 405,
-          "ins": 473
+          "ins": 471
         },
         "word/footer1.xml": {
           "del": 0,
@@ -57,7 +57,7 @@
       "summary": {
         "document": {
           "del": 405,
-          "ins": 473
+          "ins": 471
         },
         "footers": {
           "del": 0,
@@ -118,8 +118,8 @@
     "email3-ib-10-11": {
       "by_part": {
         "word/document.xml": {
-          "del": 2643,
-          "ins": 2723
+          "del": 4218,
+          "ins": 4368
         },
         "word/footer1.xml": {
           "del": 0,
@@ -360,8 +360,8 @@
       },
       "summary": {
         "document": {
-          "del": 2643,
-          "ins": 2723
+          "del": 4218,
+          "ins": 4368
         },
         "footers": {
           "del": 2,
@@ -376,8 +376,8 @@
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 1454,
-          "ins": 1920
+          "del": 2183,
+          "ins": 2460
         },
         "word/footer1.xml": {
           "del": 2,
@@ -602,8 +602,8 @@
       },
       "summary": {
         "document": {
-          "del": 1454,
-          "ins": 1920
+          "del": 2183,
+          "ins": 2460
         },
         "footers": {
           "del": 4,
@@ -618,8 +618,8 @@
     "email3-protocol-1026": {
       "by_part": {
         "word/document.xml": {
-          "del": 979,
-          "ins": 1436
+          "del": 1020,
+          "ins": 1563
         },
         "word/footer1.xml": {
           "del": 0,
@@ -648,8 +648,8 @@
       },
       "summary": {
         "document": {
-          "del": 979,
-          "ins": 1436
+          "del": 1020,
+          "ins": 1563
         },
         "footers": {
           "del": 2,
@@ -664,8 +664,8 @@
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 1268,
-          "ins": 1202
+          "del": 1276,
+          "ins": 1215
         },
         "word/footer1.xml": {
           "del": 0,
@@ -758,8 +758,8 @@
       },
       "summary": {
         "document": {
-          "del": 1268,
-          "ins": 1202
+          "del": 1276,
+          "ins": 1215
         },
         "footers": {
           "del": 0,
