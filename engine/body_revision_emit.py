@@ -1,8 +1,10 @@
 """
 Emit Word Track Changes markup (w:ins / w:del) for body paragraphs (SCRUM-59).
 
-Paragraphs are aligned with :func:`engine.paragraph_alignment.align_paragraphs` (LCS
-on block signatures) so **new paragraphs only in the revised document** become
+Top-level blocks are aligned with
+:func:`engine.paragraph_alignment.alignment_for_track_changes_emit` (index ``(i,i)``
+when counts and types match; otherwise LCS via :func:`~engine.paragraph_alignment.align_paragraphs`)
+so **new blocks only in the revised document** become
 inserted ``w:p`` elements with ``w:ins``, and paragraphs only in the original become
 full-paragraph ``w:del``. Matched paragraphs use **word/whitespace** tokens (``\\S+`` / ``\\s+``). When a
 word-level ``replace`` covers multiple tokens, we **sub-diff again at word level**
