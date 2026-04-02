@@ -372,7 +372,7 @@ def test_emit_preserves_table_equal_block_count_paragraph_vs_table_slot(
 def test_scrum120_cervical_abbreviations_paragraph_before_inserted_table(
     tmp_path: Path,
 ) -> None:
-    """SCRUM-120: revised-only paragraph then table must not reverse (tbl before p)."""
+    """SCRUM-120: revised-only paragraph then table — insert order keeps paragraph above table."""
     repo = Path(__file__).resolve().parents[1]
     v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
     v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
