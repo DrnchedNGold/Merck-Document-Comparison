@@ -421,6 +421,54 @@ def test_scrum120_cervical_abbreviations_paragraph_before_inserted_table(
     assert terms_i < first_tbl_i < rev_heading_i
 
 
+def test_emit_full_paragraph_delete_strips_numpr_no_empty_bullets(tmp_path: Path) -> None:
+    """Deleted list lines must not keep w:numPr (avoids empty bullet glyphs vs Word)."""
+    list_p = """
+<w:p>
+  <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+  <w:r><w:t>Removed line</w:t></w:r>
+</w:p>"""
+    orig_inner = "<w:p><w:r><w:t>Intro</w:t></w:r></w:p>" + list_p
+    rev_inner = "<w:p><w:r><w:t>Intro</w:t></w:r></w:p>"
+    orig = _minimal_docx(tmp_path, orig_inner, "orig_bullet.docx")
+    rev = _minimal_docx(tmp_path, rev_inner, "rev_bullet.docx")
+    out = tmp_path / "out_bullet.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    ps = [c for c in body if _local_name(c.tag) == "p"]
+    assert len(ps) >= 2
+    deleted_p = ps[1]
+    assert deleted_p.find("w:pPr/w:numPr", NS) is None
+    assert "Removed line" in _collect_del_text(deleted_p)
+
+
+def test_emit_full_paragraph_delete_strips_listbullet_pstyle(tmp_path: Path) -> None:
+    """Cervical-style list rows use ``ListBullet`` without ``w:numPr``."""
+    list_p = """
+<w:p>
+  <w:pPr><w:pStyle w:val="ListBullet"/></w:pPr>
+  <w:r><w:t>Study and trial</w:t></w:r>
+</w:p>"""
+    orig_inner = "<w:p><w:r><w:t>Intro</w:t></w:r></w:p>" + list_p
+    rev_inner = "<w:p><w:r><w:t>Intro</w:t></w:r></w:p>"
+    orig = _minimal_docx(tmp_path, orig_inner, "orig_listbullet.docx")
+    rev = _minimal_docx(tmp_path, rev_inner, "rev_listbullet.docx")
+    out = tmp_path / "out_listbullet.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    ps = [c for c in body if _local_name(c.tag) == "p"]
+    deleted_p = ps[1]
+    ppr = deleted_p.find("w:pPr", NS)
+    if ppr is not None:
+        ps_el = ppr.find("w:pStyle", NS)
+        assert ps_el is None or ps_el.get(f"{{{WORD_NS}}}val") != "ListBullet"
+    assert "Study and trial" in _collect_del_text(deleted_p)
+
+
 def test_emit_table_cell_text_change_has_revision_markers(tmp_path: Path) -> None:
     """Matched tables get per-cell w:ins / w:del like paragraph inline diff."""
     tbl = (

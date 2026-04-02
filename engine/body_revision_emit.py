@@ -141,6 +141,43 @@ def _paragraph_style_is_toc(p_el: ET.Element) -> bool:
     return u.startswith("TOC")
 
 
+def _p_style_value_indicates_list(val: str) -> bool:
+    """True for common Word list paragraph styles (e.g. ``ListBullet`` without ``w:numPr``)."""
+
+    u = "".join(val.split()).upper()
+    if u.startswith("LIST"):
+        return True
+    if "BULLET" in u or "NUMBERING" in u:
+        return True
+    return False
+
+
+def _strip_list_markers_from_p_pr(p_el: ET.Element) -> None:
+    """
+    Remove list formatting from ``w:pPr`` for full-paragraph deletes.
+
+    Emit keeps ``w:pPr`` for spacing and non-list styles, but **``w:numPr``** or
+    **list ``w:pStyle``** values (e.g. ``ListBullet``) make Word show **empty bullets**
+    when the text lives only inside ``w:del``. Word compare usually drops those
+    markers (SCRUM-120).
+    """
+
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        return
+    for child in list(ppr):
+        ln = _local_name(child.tag)
+        if ln == "numPr":
+            ppr.remove(child)
+            continue
+        if ln == "pStyle":
+            pv = child.get(f"{{{WORD_NAMESPACE}}}val")
+            if pv and _p_style_value_indicates_list(pv):
+                ppr.remove(child)
+    if len(list(ppr)) == 0:
+        p_el.remove(ppr)
+
+
 def _runs_convert_w_t_to_del_text(root: ET.Element) -> None:
     """In-place: each ``w:t`` directly under ``w:r`` becomes ``w:delText`` (Track Changes delete)."""
 
@@ -860,6 +897,7 @@ def _apply_track_changes_to_structural_container(
                     date_iso=date_iso,
                 )
                 _replace_p_content_preserving_p_pr(el, new_kids)
+                _strip_list_markers_from_p_pr(el)
         elif oi is None and rj is not None:
             rblock = rb[rj]
             next_oi = _next_alignment_original_block_index(alignment, step_i)
