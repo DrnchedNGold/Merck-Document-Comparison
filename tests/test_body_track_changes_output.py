@@ -6,11 +6,14 @@ import zipfile
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+import pytest
+
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
 from engine.body_revision_emit import (
     _build_toc_matched_line_track_change_elements,
     build_paragraph_track_change_elements,
     emit_docx_with_body_track_changes,
+    emit_docx_with_package_track_changes,
 )
 from engine.docx_body_ingest import load_word_document_xml_root
 from engine.docx_output_package import write_docx_copy_with_part_replacements
@@ -364,6 +367,58 @@ def test_emit_preserves_table_equal_block_count_paragraph_vs_table_slot(
     root = load_word_document_xml_root(out)
     assert len(root.findall(".//w:tbl", NS)) >= 1
     assert "CellOne" in _collect_t_text(root)
+
+
+def test_scrum120_cervical_abbreviations_paragraph_before_inserted_table(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-120: revised-only paragraph then table must not reverse (tbl before p)."""
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+    out = tmp_path / "scrum120_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    needle = "Terms describing racial"
+    children = list(body)
+    terms_i: int | None = None
+    for i, ch in enumerate(children):
+        if _local_name(ch.tag) == "p" and needle in _collect_t_text(ch):
+            terms_i = i
+            break
+    assert terms_i is not None
+    first_tbl_i: int | None = None
+    for j in range(terms_i + 1, len(children)):
+        ch = children[j]
+        ln = _local_name(ch.tag)
+        if ln == "tbl":
+            first_tbl_i = j
+            break
+        if ln == "ins" and ch.find(f"{{{WORD_NS}}}tbl") is not None:
+            first_tbl_i = j
+            break
+    assert first_tbl_i is not None
+    rev_heading_i = next(
+        (
+            i
+            for i, ch in enumerate(children)
+            if i > terms_i
+            and _local_name(ch.tag) == "p"
+            and "TABLE OF REVISIONS" in _collect_t_text(ch)
+        ),
+        None,
+    )
+    assert rev_heading_i is not None
+    assert terms_i < first_tbl_i < rev_heading_i
 
 
 def test_emit_table_cell_text_change_has_revision_markers(tmp_path: Path) -> None:
