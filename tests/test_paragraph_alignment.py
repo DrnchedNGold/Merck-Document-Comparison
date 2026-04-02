@@ -1,5 +1,9 @@
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
-from engine.paragraph_alignment import ParagraphAlignment, align_paragraphs
+from engine.paragraph_alignment import (
+    ParagraphAlignment,
+    align_paragraphs,
+    alignment_for_track_changes_emit,
+)
 
 
 def _p(text: str) -> dict:
@@ -19,6 +23,39 @@ def test_alignment_is_deterministic_across_runs() -> None:
         (1, 1),
         (2, 2),
     ]
+
+
+def test_alignment_for_track_changes_emit_pairs_by_index_when_types_match() -> None:
+    """Emit uses (i,i) when block counts and types align index-for-index."""
+    original = {"version": 1, "blocks": [_p("A"), _p("B")]}
+    revised = {"version": 1, "blocks": [_p("A"), _p("C")]}
+    a = alignment_for_track_changes_emit(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert [(x.original_paragraph_index, x.revised_paragraph_index) for x in a] == [
+        (0, 0),
+        (1, 1),
+    ]
+
+
+def test_alignment_for_track_changes_emit_uses_lcs_when_type_mismatches_at_index() -> None:
+    """SCRUM-115: paragraph vs table at the same index must not use blind (i,i)."""
+    table = {
+        "type": "table",
+        "id": "t1",
+        "rows": [
+            [
+                {
+                    "paragraphs": [
+                        {"type": "paragraph", "id": "c1", "runs": [{"text": "X"}]}
+                    ]
+                }
+            ]
+        ],
+    }
+    original = {"version": 1, "blocks": [_p("Header"), _p("Filler"), _p("Tail")]}
+    revised = {"version": 1, "blocks": [_p("Header"), table, _p("Tail")]}
+    a = alignment_for_track_changes_emit(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in a]
+    assert (1, 1) not in pairs
 
 
 def test_alignment_handles_insert() -> None:
