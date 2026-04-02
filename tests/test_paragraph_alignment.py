@@ -202,3 +202,51 @@ def test_alignment_delete_all_paragraphs_when_revised_empty() -> None:
     pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
     assert pairs == [(0, None), (1, None)]
 
+
+def _tbl_one_cell(text: str) -> dict:
+    return {
+        "type": "table",
+        "id": "t",
+        "rows": [
+            [
+                {
+                    "paragraphs": [
+                        {"type": "paragraph", "id": "c", "runs": [{"text": text}]},
+                    ]
+                }
+            ]
+        ],
+    }
+
+
+def test_alignment_emit_pairs_tables_after_revised_only_paragraph_scrum120() -> None:
+    """SCRUM-120: LCS (orig-only tbl, rev-only p, rev-only tbl) → match tbl for cell diff."""
+    original = {
+        "version": 1,
+        "blocks": [_p("H"), _p("intro"), _tbl_one_cell("oldcell")],
+    }
+    revised = {
+        "version": 1,
+        "blocks": [
+            _p("H"),
+            _p("intro"),
+            _p("Long new paragraph before table."),
+            _tbl_one_cell("newcell"),
+        ],
+    }
+    raw = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert [(x.original_paragraph_index, x.revised_paragraph_index) for x in raw] == [
+        (0, 0),
+        (1, 1),
+        (2, None),
+        (None, 2),
+        (None, 3),
+    ]
+    emit = alignment_for_track_changes_emit(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert [(x.original_paragraph_index, x.revised_paragraph_index) for x in emit] == [
+        (0, 0),
+        (1, 1),
+        (None, 2),
+        (2, 3),
+    ]
+
