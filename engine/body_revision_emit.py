@@ -869,8 +869,16 @@ def _build_toc_matched_line_track_change_elements(
         author=author,
         date_iso=date_iso,
     )
-    # TOC page-number deltas (e.g. 1 -> 2) create many "Deleted: 1" balloons that
-    # can hide the meaningful deleted-content balloon. Keep only the inserted number.
+    # TOC heading/list page-number deltas (e.g. 1 -> 2) can create noisy "Deleted: 1"
+    # balloons near the front-matter heading block. Limit numeric-delete suppression to
+    # those heading/list lines so deeper TOC entries still keep numeric-only del markers.
+    toc_line = (orig_text + " " + rev_text).upper()
+    suppress_numeric_delete = (
+        "TABLE OF CONTENTS" in toc_line
+        or "LIST OF TABLES" in toc_line
+        or "LIST OF ABBREVIATIONS" in toc_line
+        or "TABLE OF REVISIONS" in toc_line
+    )
     cleaned: list[ET.Element] = []
     i = 0
     while i < len(out):
@@ -878,7 +886,7 @@ def _build_toc_matched_line_track_change_elements(
         ln = _local_name(cur.tag)
         if ln == "del":
             del_txt = "".join((t.text or "") for t in cur.findall(".//w:delText", NS)).strip()
-            if re.fullmatch(r"\d+", del_txt):
+            if suppress_numeric_delete and re.fullmatch(r"\d+", del_txt):
                 if i + 1 < len(out) and _local_name(out[i + 1].tag) == "ins":
                     ins_txt = "".join(
                         (t.text or "") for t in out[i + 1].findall(".//w:t", NS)
