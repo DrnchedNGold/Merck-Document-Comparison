@@ -60,8 +60,6 @@ from .table_diff import _cell_concat_paragraph, _table_shape
 
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 NS = {"w": WORD_NAMESPACE}
-
-
 def _local_name(tag: str) -> str:
     return tag.split("}", maxsplit=1)[-1] if "}" in tag else tag
 
@@ -139,6 +137,241 @@ def _paragraph_style_is_toc(p_el: ET.Element) -> bool:
         return False
     u = val.strip().upper()
     return u.startswith("TOC")
+
+
+def _p_style_val_indicates_list_paragraph(val: str) -> bool:
+    """Heuristic: Word list / bullet paragraph styles (e.g. ``ListBullet`` without ``w:numPr``)."""
+
+    u = "".join(val.split()).upper()
+    if u.startswith("LIST"):
+        return True
+    if "BULLET" in u or "NUMBERING" in u:
+        return True
+    return False
+
+
+def _p_paragraph_style_id(p_el: ET.Element) -> str | None:
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        return None
+    ps = ppr.find("w:pStyle", NS)
+    if ps is None:
+        return None
+    return ps.get(f"{{{WORD_NAMESPACE}}}val")
+
+
+def _p_only_p_pr_and_single_w_del(p_el: ET.Element) -> bool:
+    """True when ``w:p`` has optional ``w:pPr`` and exactly one ``w:del`` (no other block children)."""
+
+    non_ppr = [c for c in p_el if _local_name(c.tag) != "pPr"]
+    return len(non_ppr) == 1 and _local_name(non_ppr[0].tag) == "del"
+
+
+def _append_br_run_to_del(del_el: ET.Element) -> None:
+    br_r = ET.Element(f"{{{WORD_NAMESPACE}}}r")
+    br_el = ET.SubElement(br_r, f"{{{WORD_NAMESPACE}}}br")
+    br_el.set(f"{{{WORD_NAMESPACE}}}type", "textWrapping")
+    del_el.append(br_r)
+
+
+def _coalesce_w_del_runs_to_single_del_text(del_el: ET.Element) -> None:
+    """
+    After merging several full-paragraph deletes, replace many ``w:r`` / ``w:delText`` / ``w:br``
+    with **one** ``w:r`` and one ``w:delText``. Use **spaces** between former lines so Word shows
+    a **single flowing line** of strike-through (SCRUM-130); collapse redundant whitespace.
+    """
+
+    direct_runs = [c for c in del_el if _local_name(c.tag) == "r"]
+    if not direct_runs:
+        return
+    needs_coalesce = len(direct_runs) > 1
+    if not needs_coalesce:
+        for r_el in direct_runs:
+            for gg in r_el:
+                if _local_name(gg.tag) == "br":
+                    needs_coalesce = True
+                    break
+            if needs_coalesce:
+                break
+    if not needs_coalesce:
+        return
+
+    pieces: list[str] = []
+    had_br = False
+    for r_el in direct_runs:
+        for gg in r_el:
+            ln = _local_name(gg.tag)
+            if ln == "delText":
+                pieces.append(gg.text or "")
+            elif ln == "br":
+                had_br = True
+                pieces.append(" ")
+    # Keep line-broken merged deletes as-is so Word shows one balloon with
+    # separate deleted lines (not a flattened sentence).
+    if had_br:
+        return
+    combined = "".join(pieces)
+    combined = re.sub(r"\s+", " ", combined).strip()
+    for ch in list(del_el):
+        del_el.remove(ch)
+    r_out = ET.Element(f"{{{WORD_NAMESPACE}}}r")
+    dt = ET.SubElement(r_out, f"{{{WORD_NAMESPACE}}}delText")
+    dt.text = combined
+    del_el.append(r_out)
+
+
+def _strip_list_layout_from_merged_consolidated_delete_paragraph(p_el: ET.Element) -> None:
+    """
+    Consolidated delete still inherited ``Paragraph`` / list indents / ``w:tabs`` from the first
+    merged ``w:p``; Word can draw bullets or hanging space. Force plain ``Normal`` and zero
+    indents so removed list content leaves no list chrome (SCRUM-130).
+    """
+
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        ppr = ET.Element(f"{{{WORD_NAMESPACE}}}pPr")
+        ps = ET.SubElement(ppr, f"{{{WORD_NAMESPACE}}}pStyle")
+        ps.set(f"{{{WORD_NAMESPACE}}}val", "Normal")
+        p_el.insert(0, ppr)
+        return
+    for ch in list(ppr):
+        ln = _local_name(ch.tag)
+        if ln in ("numPr", "tabs", "ind"):
+            ppr.remove(ch)
+    ps = ppr.find("w:pStyle", NS)
+    if ps is None:
+        ps = ET.Element(f"{{{WORD_NAMESPACE}}}pStyle")
+        ps.set(f"{{{WORD_NAMESPACE}}}val", "Normal")
+        ppr.insert(0, ps)
+    else:
+        ps.set(f"{{{WORD_NAMESPACE}}}val", "Normal")
+    ind = ET.Element(f"{{{WORD_NAMESPACE}}}ind")
+    ind.set(f"{{{WORD_NAMESPACE}}}left", "0")
+    ind.set(f"{{{WORD_NAMESPACE}}}right", "0")
+    ind.set(f"{{{WORD_NAMESPACE}}}hanging", "0")
+    ind.set(f"{{{WORD_NAMESPACE}}}firstLine", "0")
+    ind.set(f"{{{WORD_NAMESPACE}}}start", "0")
+    ind.set(f"{{{WORD_NAMESPACE}}}end", "0")
+    ppr.append(ind)
+
+
+def _merge_w_del_paragraph_group_into_first(
+    container: ET.Element, paragraphs: list[ET.Element]
+) -> None:
+    """Join several ``w:p`` (each single ``w:del``) into the first ``w:p`` using ``w:br`` between chunks."""
+
+    if len(paragraphs) < 2:
+        return
+    first = paragraphs[0]
+    first_del = first.find("w:del", NS)
+    if first_del is None:
+        return
+    for p in paragraphs[1:]:
+        other = p.find("w:del", NS)
+        if other is None:
+            continue
+        _append_br_run_to_del(first_del)
+        for ch in list(other):
+            first_del.append(copy.deepcopy(ch))
+        container.remove(p)
+    _coalesce_w_del_runs_to_single_del_text(first_del)
+    _strip_list_layout_from_merged_consolidated_delete_paragraph(first)
+
+
+def _style_ok_after_paragraph_intro_for_list_merge(sid: str | None) -> bool:
+    """
+    Body lines after the first deleted ``Paragraph`` in sponsor templates: another ``Paragraph``
+    (e.g. “The following terms…”) often precedes ``ListBullet`` rows — must merge into one block
+    (SCRUM-130). Also allow ``Normal`` and list-like styles.
+    """
+
+    if sid == "Normal" or sid == "Paragraph":
+        return True
+    if sid and _p_style_val_indicates_list_paragraph(sid):
+        return True
+    return False
+
+
+def _post_merge_paragraph_intro_then_list_like_full_deletes(container: ET.Element) -> None:
+    """
+    Diversity-plan style: ``Paragraph`` intro + ``ListBullet`` rows all deleted → one ``w:p``, one ``w:del``
+    with ``w:br`` between lines (SCRUM-130). Avoids one revision per bullet and duplicate sidebar noise.
+    """
+
+    idx = 0
+    while idx < len(container):
+        el = container[idx]
+        if _local_name(el.tag) != "p":
+            idx += 1
+            continue
+        if not _p_only_p_pr_and_single_w_del(el) or _p_paragraph_style_id(el) != "Paragraph":
+            idx += 1
+            continue
+        intro_del = el.find("w:del", NS)
+        if intro_del is None:
+            idx += 1
+            continue
+        j = idx + 1
+        merged_followers = False
+        while j < len(container):
+            nxt = container[j]
+            if _local_name(nxt.tag) != "p":
+                break
+            if not _p_only_p_pr_and_single_w_del(nxt):
+                break
+            n_sid = _p_paragraph_style_id(nxt)
+            if not _style_ok_after_paragraph_intro_for_list_merge(n_sid):
+                break
+            other_del = nxt.find("w:del", NS)
+            if other_del is None:
+                break
+            _append_br_run_to_del(intro_del)
+            for ch in list(other_del):
+                intro_del.append(copy.deepcopy(ch))
+            container.remove(nxt)
+            merged_followers = True
+        if merged_followers:
+            _coalesce_w_del_runs_to_single_del_text(intro_del)
+            _strip_list_layout_from_merged_consolidated_delete_paragraph(el)
+        idx += 1
+
+
+def _post_merge_consecutive_same_list_like_full_deletes(container: ET.Element) -> None:
+    """
+    Merge **2+** adjacent full-paragraph deletes that share the same list-like ``w:pStyle`` (no ``Paragraph``
+    intro). Runs after :func:`_post_merge_paragraph_intro_then_list_like_full_deletes`.
+    """
+
+    idx = 0
+    while idx < len(container):
+        el = container[idx]
+        if _local_name(el.tag) != "p" or not _p_only_p_pr_and_single_w_del(el):
+            idx += 1
+            continue
+        sid = _p_paragraph_style_id(el)
+        if not sid or not _p_style_val_indicates_list_paragraph(sid):
+            idx += 1
+            continue
+        group: list[ET.Element] = [el]
+        j = idx + 1
+        while j < len(container):
+            nxt = container[j]
+            if _local_name(nxt.tag) != "p" or not _p_only_p_pr_and_single_w_del(nxt):
+                break
+            n_sid = _p_paragraph_style_id(nxt)
+            if n_sid != sid:
+                break
+            group.append(nxt)
+            j += 1
+        if len(group) >= 2:
+            _merge_w_del_paragraph_group_into_first(container, group)
+        idx += 1
+
+
+def _post_merge_consolidated_list_full_paragraph_deletes(container: ET.Element) -> None:
+    """Post-pass: consolidate adjacent deleted list rows into fewer ``w:del`` blocks (SCRUM-130)."""
+    _post_merge_paragraph_intro_then_list_like_full_deletes(container)
+    _post_merge_consecutive_same_list_like_full_deletes(container)
 
 
 def _runs_convert_w_t_to_del_text(root: ET.Element) -> None:
@@ -629,13 +862,45 @@ def _build_toc_matched_line_track_change_elements(
 
     orig_text = _concat_paragraph_text_toc_track_layout(original, config)
     rev_text = _concat_paragraph_text_toc_track_layout(revised, config)
-    return _track_change_elements_for_concat_texts(
+    out = _track_change_elements_for_concat_texts(
         orig_text,
         rev_text,
         id_counter=id_counter,
         author=author,
         date_iso=date_iso,
     )
+    # TOC heading/list page-number deltas (e.g. 1 -> 2) can create noisy "Deleted: 1"
+    # balloons near the front-matter heading block. Limit numeric-delete suppression to
+    # those heading/list lines so deeper TOC entries still keep numeric-only del markers.
+    toc_line = (orig_text + " " + rev_text).upper()
+    suppress_numeric_delete = (
+        "TABLE OF CONTENTS" in toc_line
+        or "LIST OF TABLES" in toc_line
+        or "LIST OF ABBREVIATIONS" in toc_line
+        or "TABLE OF REVISIONS" in toc_line
+    )
+    cleaned: list[ET.Element] = []
+    i = 0
+    while i < len(out):
+        cur = out[i]
+        ln = _local_name(cur.tag)
+        if ln == "del":
+            del_txt = "".join((t.text or "") for t in cur.findall(".//w:delText", NS)).strip()
+            if suppress_numeric_delete and re.fullmatch(r"\d+", del_txt):
+                if i + 1 < len(out) and _local_name(out[i + 1].tag) == "ins":
+                    ins_txt = "".join(
+                        (t.text or "") for t in out[i + 1].findall(".//w:t", NS)
+                    ).strip()
+                    if re.fullmatch(r"\d+", ins_txt):
+                        for run in _w_runs_for_plain_text(ins_txt):
+                            cleaned.append(run)
+                        i += 2
+                        continue
+                i += 1
+                continue
+        cleaned.append(cur)
+        i += 1
+    return cleaned
 
 
 def _tc_direct_paragraph_elements(tc: ET.Element) -> list[ET.Element]:
@@ -671,6 +936,228 @@ def _w_ins_wrap_block_content(
     )
     ins_el.append(inner)
     return ins_el
+
+
+def _wrap_paragraph_non_ppr_children_with_ins(
+    p_el: ET.Element,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> None:
+    """Wrap one table paragraph's non-``w:pPr`` children in a single ``w:ins``."""
+
+    non_ppr = [c for c in p_el if _local_name(c.tag) != "pPr"]
+    if not non_ppr:
+        return
+    if len(non_ppr) == 1 and _local_name(non_ppr[0].tag) == "ins":
+        return
+    ins_el = ET.Element(
+        f"{{{WORD_NAMESPACE}}}ins",
+        {
+            f"{{{WORD_NAMESPACE}}}id": _next_id(id_counter),
+            f"{{{WORD_NAMESPACE}}}author": author,
+            f"{{{WORD_NAMESPACE}}}date": date_iso,
+        },
+    )
+    for ch in list(p_el):
+        if _local_name(ch.tag) == "pPr":
+            continue
+        ins_el.append(copy.deepcopy(ch))
+        p_el.remove(ch)
+    insert_at = 0
+    for i, ch in enumerate(p_el):
+        if _local_name(ch.tag) == "pPr":
+            insert_at = i + 1
+            break
+    p_el.insert(insert_at, ins_el)
+
+
+def _mark_table_content_as_inserted(
+    tbl_el: ET.Element,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> None:
+    """Revised-only table: keep ``w:tbl`` in-flow and mark paragraph content with ``w:ins``."""
+
+    for p_el in tbl_el.findall(".//w:p", NS):
+        _wrap_paragraph_non_ppr_children_with_ins(
+            p_el,
+            id_counter=id_counter,
+            author=author,
+            date_iso=date_iso,
+        )
+
+
+def _table_preview_text(tbl_el: ET.Element) -> str:
+    parts: list[str] = []
+    for t in tbl_el.findall(".//w:t", NS):
+        if t.text:
+            parts.append(t.text)
+            if len("".join(parts)) > 120:
+                break
+    return "".join(parts)[:120]
+
+
+def _paragraph_contains_text(p_el: ET.Element, needle: str) -> bool:
+    text = "".join((t.text or "") for t in p_el.findall(".//w:t", NS))
+    return needle.lower() in text.lower()
+
+
+def _paragraph_has_page_break_before(p_el: ET.Element) -> bool:
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        return False
+    return ppr.find("w:pageBreakBefore", NS) is not None
+
+
+def _ensure_page_break_before_from_revised(orig_p: ET.Element, rev_p: ET.Element) -> bool:
+    """
+    If revised paragraph has ``w:pageBreakBefore`` and original paragraph lacks it,
+    copy that one property into the original paragraph ``w:pPr``.
+    """
+
+    if not _paragraph_has_page_break_before(rev_p):
+        return False
+    ppr = orig_p.find("w:pPr", NS)
+    if ppr is None:
+        ppr = ET.Element(f"{{{WORD_NAMESPACE}}}pPr")
+        orig_p.insert(0, ppr)
+    if ppr.find("w:pageBreakBefore", NS) is not None:
+        return False
+    ppr.append(ET.Element(f"{{{WORD_NAMESPACE}}}pageBreakBefore"))
+    return True
+
+
+def _copy_revised_p_pr_to_inserted_paragraph(new_p: ET.Element, rev_p: ET.Element) -> None:
+    """Preserve revised paragraph layout (including page breaks) on revised-only inserts."""
+
+    rev_ppr = rev_p.find("w:pPr", NS)
+    if rev_ppr is None:
+        return
+    existing = new_p.find("w:pPr", NS)
+    if existing is not None:
+        new_p.remove(existing)
+    new_p.insert(0, copy.deepcopy(rev_ppr))
+
+
+def _paragraph_plain_text(p_el: ET.Element) -> str:
+    return "".join((t.text or "") for t in p_el.findall(".//w:t", NS))
+
+
+def _ensure_page_break_before_toc_heading_after_first_table(container: ET.Element) -> bool:
+    """
+    Word-compare parity (SCRUM-130 pagination): when the first study table remains
+    in front matter, TOC heading should begin on the next page.
+    """
+
+    children = list(container)
+    first_table_idx: int | None = None
+    for i, ch in enumerate(children):
+        ln = _local_name(ch.tag)
+        if ln == "tbl" or (ln == "ins" and ch.find("w:tbl", NS) is not None):
+            first_table_idx = i
+            break
+    if first_table_idx is None:
+        return False
+
+    for ch in children[first_table_idx + 1 :]:
+        if _local_name(ch.tag) != "p":
+            continue
+        txt_raw = _paragraph_plain_text(ch).strip()
+        txt = txt_raw.upper()
+        sid = _p_paragraph_style_id(ch)
+        is_toc_heading = txt == "TABLE OF CONTENTS"
+        is_toc_first_line = txt.startswith("TABLE OF CONTENTS") and sid == "TOC1"
+        if not (is_toc_heading or is_toc_first_line):
+            continue
+        ppr = ch.find("w:pPr", NS)
+        if ppr is None:
+            ppr = ET.Element(f"{{{WORD_NAMESPACE}}}pPr")
+            ch.insert(0, ppr)
+        if ppr.find("w:pageBreakBefore", NS) is not None:
+            return False
+        ppr.append(ET.Element(f"{{{WORD_NAMESPACE}}}pageBreakBefore"))
+        return True
+    return False
+
+
+def _relocate_legacy_toc_title_before_first_table_to_toc_section(
+    container: ET.Element,
+) -> bool:
+    """
+    Move a leading legacy ``TOCTitle`` paragraph (``TABLE OF CONTENTS``) so it
+    appears right before the revised TOC block after the first table.
+    """
+
+    children = list(container)
+    first_table_idx: int | None = None
+    for i, ch in enumerate(children):
+        ln = _local_name(ch.tag)
+        if ln == "tbl" or (ln == "ins" and ch.find("w:tbl", NS) is not None):
+            first_table_idx = i
+            break
+    if first_table_idx is None:
+        return False
+
+    legacy_heading: ET.Element | None = None
+    for ch in children[:first_table_idx]:
+        if _local_name(ch.tag) != "p":
+            continue
+        if (
+            _p_paragraph_style_id(ch) == "TOCTitle"
+            and _paragraph_plain_text(ch).strip().upper() == "TABLE OF CONTENTS"
+        ):
+            legacy_heading = ch
+            break
+    if legacy_heading is None:
+        return False
+
+    target_toc_idx: int | None = None
+    for i in range(first_table_idx + 1, len(children)):
+        ch = children[i]
+        if _local_name(ch.tag) != "p":
+            continue
+        txt = _paragraph_plain_text(ch).strip().upper()
+        if txt.startswith("TABLE OF CONTENTS") and _p_paragraph_style_id(ch) == "TOC1":
+            target_toc_idx = i
+            break
+    if target_toc_idx is None:
+        return False
+
+    # Remove old heading before table and insert right before TOC section.
+    container.remove(legacy_heading)
+    children_after = list(container)
+    insert_idx = len(children_after)
+    for i, ch in enumerate(children_after):
+        if _local_name(ch.tag) != "p":
+            continue
+        txt = _paragraph_plain_text(ch).strip().upper()
+        if txt.startswith("TABLE OF CONTENTS") and _p_paragraph_style_id(ch) == "TOC1":
+            insert_idx = i
+            break
+
+    ppr = legacy_heading.find("w:pPr", NS)
+    if ppr is None:
+        ppr = ET.Element(f"{{{WORD_NAMESPACE}}}pPr")
+        legacy_heading.insert(0, ppr)
+    ps = ppr.find("w:pStyle", NS)
+    if ps is None:
+        ps = ET.Element(f"{{{WORD_NAMESPACE}}}pStyle")
+        ppr.insert(0, ps)
+    ps.set(f"{{{WORD_NAMESPACE}}}val", "Heading1Unnumbered")
+    jc = ppr.find("w:jc", NS)
+    if jc is None:
+        jc = ET.Element(f"{{{WORD_NAMESPACE}}}jc")
+        ppr.append(jc)
+    jc.set(f"{{{WORD_NAMESPACE}}}val", "center")
+    if ppr.find("w:pageBreakBefore", NS) is None:
+        ppr.append(ET.Element(f"{{{WORD_NAMESPACE}}}pageBreakBefore"))
+
+    container.insert(insert_idx, legacy_heading)
+    return True
 
 
 def _apply_matched_table_track_changes(
@@ -802,6 +1289,13 @@ def _apply_track_changes_to_structural_container(
                 continue
             orig_para: BodyParagraph = oblock  # type: ignore[assignment]
             rev_para: BodyParagraph = rblock  # type: ignore[assignment]
+            rev_el_for_match: ET.Element | None = None
+            if (
+                revised_block_elements is not None
+                and rj < len(revised_block_elements)
+                and _local_name(revised_block_elements[rj].tag) == "p"
+            ):
+                rev_el_for_match = revised_block_elements[rj]
             if _paragraph_style_is_toc(el):
                 if not _toc_matched_line_needs_revision(orig_para, rev_para, config):
                     continue
@@ -884,13 +1378,14 @@ def _apply_track_changes_to_structural_container(
                 ):
                     rev_tbl_el = revised_block_elements[rj]
                 if rev_tbl_el is not None:
-                    wrapped = _w_ins_wrap_block_content(
-                        copy.deepcopy(rev_tbl_el),
+                    inserted_tbl = copy.deepcopy(rev_tbl_el)
+                    _mark_table_content_as_inserted(
+                        inserted_tbl,
                         id_counter=id_counter,
                         author=author,
                         date_iso=date_iso,
                     )
-                    container.insert(idx, wrapped)
+                    container.insert(idx, inserted_tbl)
                     rev_insert_count += 1
                 continue
             if rblock.get("type") != "paragraph":
@@ -920,6 +1415,8 @@ def _apply_track_changes_to_structural_container(
                     author=author,
                     date_iso=date_iso,
                 )
+            if rev_el is not None:
+                _copy_revised_p_pr_to_inserted_paragraph(new_p, rev_el)
             container.insert(idx, new_p)
             rev_insert_count += 1
 
@@ -1035,6 +1532,11 @@ def apply_body_track_changes_to_document_root(
         counter,
         revised_block_elements=revised_block_elements,
     )
+    _post_merge_consolidated_list_full_paragraph_deletes(body)
+    relocated_legacy_toc_title = _relocate_legacy_toc_title_before_first_table_to_toc_section(
+        body
+    )
+    _ensure_page_break_before_toc_heading_after_first_table(body)
 
 
 def apply_track_changes_to_hdr_ftr_root(
@@ -1071,6 +1573,7 @@ def apply_track_changes_to_hdr_ftr_root(
         counter,
         revised_block_elements=revised_block_elements,
     )
+    _post_merge_consolidated_list_full_paragraph_deletes(hdr_or_ftr_root)
 
 
 def emit_docx_with_package_track_changes(

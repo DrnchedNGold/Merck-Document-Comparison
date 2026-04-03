@@ -421,6 +421,142 @@ def test_scrum120_cervical_abbreviations_paragraph_before_inserted_table(
     assert terms_i < first_tbl_i < rev_heading_i
 
 
+def test_scrum130_merges_two_paragraph_intros_then_list_bullets(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-130: sponsor abbreviations — two ``Paragraph`` lines then bullets → one line, one ``w:del``."""
+    orig_inner = """
+<w:p><w:r><w:t>Keep</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Paragraph"/></w:pPr><w:r><w:t>This list serves as the first appearance.</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Paragraph"/></w:pPr><w:r><w:t>The following terms may be used interchangeably:</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>RowA</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>RowB</w:t></w:r></w:p>
+"""
+    rev_inner = "<w:p><w:r><w:t>Keep</w:t></w:r></w:p>"
+    orig = _minimal_docx(tmp_path, orig_inner, "orig_scrum130_two_para.docx")
+    rev = _minimal_docx(tmp_path, rev_inner, "rev_scrum130_two_para.docx")
+    out = tmp_path / "out_scrum130_two_para.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    dels = body.findall(".//w:del", NS)
+    assert len(dels) == 1
+    dt = _collect_del_text(dels[0])
+    assert "This list serves" in dt
+    assert "following terms" in dt
+    assert "RowA" in dt and "RowB" in dt
+    assert "\n" not in dt
+    assert len(dels[0].findall("w:r", NS)) >= 1
+    assert len(dels[0].findall(".//w:br", NS)) >= 1
+    merged_p = next(p for p in body.findall("w:p", NS) if p.find("w:del", NS) is not None)
+    ppr = merged_p.find("w:pPr", NS)
+    assert ppr is not None
+    ps = ppr.find("w:pStyle", NS)
+    assert ps is not None and ps.get(f"{{{WORD_NS}}}val") == "Normal"
+    assert ppr.find("w:numPr", NS) is None
+
+
+def test_scrum130_merges_paragraph_intro_and_list_bullet_full_deletes(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-130: ``Paragraph`` intro + list rows removed → one ``w:del`` on the intro ``w:p``."""
+    orig_inner = """
+<w:p><w:r><w:t>Keep</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Paragraph"/></w:pPr><w:r><w:t>Intro line removed</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>RowA</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>RowB</w:t></w:r></w:p>
+"""
+    rev_inner = "<w:p><w:r><w:t>Keep</w:t></w:r></w:p>"
+    orig = _minimal_docx(tmp_path, orig_inner, "orig_scrum130_intro_list.docx")
+    rev = _minimal_docx(tmp_path, rev_inner, "rev_scrum130_intro_list.docx")
+    out = tmp_path / "out_scrum130_intro_list.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    dels = body.findall(".//w:del", NS)
+    assert len(dels) == 1
+    merged = dels[0]
+    assert "Intro line removed" in _collect_del_text(merged)
+    assert "RowA" in _collect_del_text(merged)
+    assert "RowB" in _collect_del_text(merged)
+    assert len(merged.findall("w:r", NS)) >= 1
+    assert len(merged.findall(".//w:br", NS)) >= 1
+    mp = next(p for p in body.findall("w:p", NS) if p.find("w:del", NS) is merged)
+    assert mp.find("w:pPr/w:pStyle", NS).get(f"{{{WORD_NS}}}val") == "Normal"
+
+
+def test_scrum130_merges_consecutive_list_bullet_full_deletes_without_intro(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-130: consecutive ``ListBullet`` full deletes (no ``Paragraph`` intro) → one ``w:del``."""
+    orig_inner = """
+<w:p><w:r><w:t>Keep</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>Alpha</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>Bravo</w:t></w:r></w:p>
+"""
+    rev_inner = "<w:p><w:r><w:t>Keep</w:t></w:r></w:p>"
+    orig = _minimal_docx(tmp_path, orig_inner, "orig_scrum130_list_only.docx")
+    rev = _minimal_docx(tmp_path, rev_inner, "rev_scrum130_list_only.docx")
+    out = tmp_path / "out_scrum130_list_only.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    dels = body.findall(".//w:del", NS)
+    assert len(dels) == 1
+    dt = _collect_del_text(dels[0])
+    assert "Alpha" in dt and "Bravo" in dt
+    assert len(dels[0].findall("w:r", NS)) >= 1
+    assert len(dels[0].findall(".//w:br", NS)) >= 1
+    mp = next(p for p in body.findall("w:p", NS) if p.find("w:del", NS) is dels[0])
+    assert mp.find("w:pPr/w:pStyle", NS).get(f"{{{WORD_NS}}}val") == "Normal"
+
+
+def test_scrum130_cervical_abbreviations_consolidated_single_deletion_block(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-130: real cervical pair — removed abbreviations list is one ``w:del``, not one per bullet."""
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+    out = tmp_path / "scrum130_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    abbrev_p: ET.Element | None = None
+    for p in body.findall("w:p", NS):
+        if "following terms" in _collect_del_text(p).lower():
+            abbrev_p = p
+            break
+    assert abbrev_p is not None
+    assert len(abbrev_p.findall("w:del", NS)) == 1
+    one_del = abbrev_p.find("w:del", NS)
+    assert one_del is not None
+    blob = _collect_del_text(one_del)
+    # v2 may still match the first body line (“This list serves…”) unchanged; the consolidated
+    # delete then starts at the next paragraph + bullets (see cervical v1/v2 alignment).
+    assert "following terms" in blob.lower()
+    assert "Study and trial" in blob
+    assert "Black and African American" in blob
+    assert "\n" not in blob
+    assert len(one_del.findall("w:r", NS)) >= 1
+    assert len(one_del.findall(".//w:br", NS)) >= 1
+    ppr = abbrev_p.find("w:pPr", NS)
+    assert ppr is not None
+    assert ppr.find("w:pStyle", NS).get(f"{{{WORD_NS}}}val") == "Normal"
+    assert ppr.find("w:numPr", NS) is None
+
+
 def test_emit_table_cell_text_change_has_revision_markers(tmp_path: Path) -> None:
     """Matched tables get per-cell w:ins / w:del like paragraph inline diff."""
     tbl = (
