@@ -22,6 +22,10 @@ planning and verification.
 
 ### Email 2 (GIP)
 
+Some Jira repros name **`sample-docs/email2docs/diversity-plan-cervical-cancer-version{1,2}.docx`**.
+That path is not in the committed corpus; use the same filenames under **`email1docs/`** (above) for
+SCRUM-130 / abbreviations verification unless your team adds copies under `email2docs/`.
+
 - `ind-general-investigation-plan-3475-v2.docx` (source)
 - `ind-general-investigation-plan-3475-V2 compare to V1.docx` (Merck compare output)
 - `ind-general-investigation-plan-V940-v1.docx` (source)

@@ -26,6 +26,56 @@ EXIT_PREFLIGHT = 10
 EXIT_DOCUMENT_STRUCTURE = 11
 EXIT_COMPARE_RUN = 12
 
+WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_W_NS = {"w": WORD_NS}
+
+
+def _verbose_emit_revision_stats(output_docx: Path) -> None:
+    """
+    SCRUM-130 sanity: after emit, print how the abbreviations-style delete block looks in XML.
+
+    If consolidation ran, expect **one** ``w:p`` containing ``following terms`` in ``w:delText``,
+    **one** ``w:del``, and **one** ``w:r`` inside it (no per-bullet paragraphs). Use this to
+    confirm Word is opening the file this CLI just wrote — not an older build or Merck reference output.
+    """
+
+    import zipfile
+
+    with zipfile.ZipFile(output_docx, "r") as zf:
+        root = ET.fromstring(zf.read("word/document.xml"))
+    body = root.find("w:body", _W_NS)
+    total_del = len(root.findall(".//w:del", _W_NS))
+    print(f"emit-stats: word/document.xml w:del total = {total_del}", file=sys.stderr)
+    if body is None:
+        return
+    hits = 0
+    for p in body.findall("w:p", _W_NS):
+        blob = "".join(t.text or "" for t in p.findall(".//w:delText", _W_NS))
+        if "following terms" not in blob.lower():
+            continue
+        hits += 1
+        n_del = len(p.findall("w:del", _W_NS))
+        runs = sum(len(d.findall("w:r", _W_NS)) for d in p.findall("w:del", _W_NS))
+        ps = ""
+        ppr = p.find("w:pPr", _W_NS)
+        if ppr is not None:
+            ps_el = ppr.find("w:pStyle", _W_NS)
+            if ps_el is not None:
+                ps = ps_el.get(f"{{{WORD_NS}}}val") or ""
+        has_num = (
+            ppr.find("w:numPr", _W_NS) is not None if ppr is not None else False
+        )
+        print(
+            f"emit-stats: abbreviations delete block — w:pStyle={ps!r} numPr={has_num} "
+            f"w:del in paragraph={n_del} w:r inside those dels={runs} preview={blob[:90]!r}",
+            file=sys.stderr,
+        )
+    if hits == 0:
+        print(
+            "emit-stats: no paragraph with 'following terms' in w:delText (pair may differ)",
+            file=sys.stderr,
+        )
+
 
 def _load_compare_config(path: Path | None) -> tuple[int, str | None, CompareConfig | None]:
     if path is None:
@@ -104,6 +154,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional fixed w:date (ISO-8601 UTC, e.g. 2026-03-28T12:00:00Z) for reproducible runs.",
     )
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="After success, print w:del stats (SCRUM-130: confirm consolidated abbreviations block in output).",
+    )
     return p
 
 
@@ -133,6 +189,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:  # noqa: BLE001 — last-resort mapping for stable exit bucket
         print(str(e), file=sys.stderr)
         return EXIT_COMPARE_RUN
+    if args.verbose:
+        _verbose_emit_revision_stats(args.output)
     return EXIT_SUCCESS
 
 

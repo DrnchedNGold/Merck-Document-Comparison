@@ -77,6 +77,31 @@ def test_main_non_docx_original_exits_preflight(tmp_path: Path) -> None:
     assert main(["--original", str(orig), "--revised", str(rev), "--output", str(out)]) == EXIT_PREFLIGHT
 
 
+def test_main_verbose_prints_emit_stats(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    orig = tmp_path / "o.docx"
+    rev = tmp_path / "r.docx"
+    out = tmp_path / "out.docx"
+    _minimal_docx(orig, "<w:p><w:r><w:t>Hi</w:t></w:r></w:p>")
+    _minimal_docx(rev, "<w:p><w:r><w:t>Hi there</w:t></w:r></w:p>")
+    code = main(
+        [
+            "--original",
+            str(orig),
+            "--revised",
+            str(rev),
+            "--output",
+            str(out),
+            "--date-iso",
+            "2026-03-28T12:00:00Z",
+            "-v",
+        ]
+    )
+    assert code == EXIT_SUCCESS
+    err = capsys.readouterr().err
+    assert "emit-stats:" in err
+    assert "w:del total" in err
+
+
 def test_main_success_writes_output(tmp_path: Path) -> None:
     orig = tmp_path / "o.docx"
     rev = tmp_path / "r.docx"

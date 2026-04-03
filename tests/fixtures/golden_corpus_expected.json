@@ -42,7 +42,7 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 405,
+          "del": 397,
           "ins": 471
         },
         "word/footer1.xml": {
@@ -56,7 +56,7 @@
       },
       "summary": {
         "document": {
-          "del": 405,
+          "del": 397,
           "ins": 471
         },
         "footers": {
@@ -618,7 +618,7 @@
     "email3-protocol-1026": {
       "by_part": {
         "word/document.xml": {
-          "del": 1020,
+          "del": 1013,
           "ins": 1563
         },
         "word/footer1.xml": {
@@ -648,7 +648,7 @@
       },
       "summary": {
         "document": {
-          "del": 1020,
+          "del": 1013,
           "ins": 1563
         },
         "footers": {
@@ -664,7 +664,7 @@
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 1276,
+          "del": 1239,
           "ins": 1215
         },
         "word/footer1.xml": {
@@ -758,7 +758,7 @@
       },
       "summary": {
         "document": {
-          "del": 1276,
+          "del": 1239,
           "ins": 1215
         },
         "footers": {
