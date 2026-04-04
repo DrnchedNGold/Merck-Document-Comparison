@@ -56,7 +56,13 @@ from .docx_package_parts import (
     discover_header_footer_part_paths_from_namelist,
 )
 from .ooxml_namespace import serialize_ooxml_part
-from .table_diff import _cell_concat_paragraph, _table_shape
+from .table_diff import (
+    _align_row_cells,
+    _align_table_rows,
+    _cell_concat_paragraph,
+    _is_abbreviation_definition_table,
+    _table_shape,
+)
 
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 NS = {"w": WORD_NAMESPACE}
@@ -1174,12 +1180,19 @@ def _apply_matched_table_track_changes(
 ) -> None:
     """
     Preserve table grid while applying per-cell Track Changes, matching
-    :func:`table_diff.diff_table_blocks` cell merge semantics. On row/column
-    shape mismatch, replace the original ``w:tbl`` with a copy of the revised
-    table when OOXML is available.
+    :func:`table_diff.diff_table_blocks` cell merge semantics.
+
+    Row/column additions and removals are emitted at cell level against
+    synthetic empty cells, so matched tables do not degrade into whole-table
+    replacement.
     """
 
-    if _table_shape(orig_table) != _table_shape(rev_table):
+    rows_o = orig_table.get("rows", [])
+    rows_r = rev_table.get("rows", [])
+    is_abbrev_tbl = _is_abbreviation_definition_table(rows_o, rows_r, config)
+
+    # Keep legacy behavior for non-target tables to avoid broad output drift.
+    if not is_abbrev_tbl and _table_shape(orig_table) != _table_shape(rev_table):
         if revised_tbl_el is not None:
             _replace_body_child_element(
                 container, tbl_el, copy.deepcopy(revised_tbl_el)
@@ -1187,36 +1200,67 @@ def _apply_matched_table_track_changes(
         return
 
     tr_els = _tbl_tr_elements(tbl_el)
-    rows_o = orig_table.get("rows", [])
-    rows_r = rev_table.get("rows", [])
-    for r, row_o in enumerate(rows_o):
-        if r >= len(tr_els) or r >= len(rows_r):
-            break
-        row_r = rows_r[r]
-        tcs = [c for c in tr_els[r] if _local_name(c.tag) == "tc"]
-        for c, cell_o in enumerate(row_o):
-            if c >= len(tcs) or c >= len(row_r):
-                break
-            cell_r = row_r[c]
-            tc_el = tcs[c]
-            paras = _tc_direct_paragraph_elements(tc_el)
-            if not paras:
-                continue
-            orig_para = _cell_concat_paragraph(cell_o)
-            rev_para = _cell_concat_paragraph(cell_r)
-            if not _paragraph_needs_revision(orig_para, rev_para, config):
-                continue
-            new_kids = build_paragraph_track_change_elements(
-                orig_para,
-                rev_para,
+    rev_tr_els = _tbl_tr_elements(revised_tbl_el) if revised_tbl_el is not None else []
+
+    if not is_abbrev_tbl:
+        row_alignment = [(i, i) for i in range(min(len(rows_o), len(rows_r)))]
+    else:
+        row_alignment = _align_table_rows(rows_o, rows_r, config)
+    out_row = 0
+    for oi, ri in row_alignment:
+        row_o = rows_o[oi] if oi is not None else []
+        row_r = rows_r[ri] if ri is not None else []
+
+        # Row exists only in revised: insert cloned row at aligned position.
+        if oi is None and ri is not None and ri < len(rev_tr_els):
+            new_tr = copy.deepcopy(rev_tr_els[ri])
+            if out_row < len(tr_els):
+                anchor_tr = tr_els[out_row]
+                tbl_el.insert(list(tbl_el).index(anchor_tr), new_tr)
+                tr_els.insert(out_row, new_tr)
+            else:
+                tbl_el.append(new_tr)
+                tr_els.append(new_tr)
+        elif out_row >= len(tr_els):
+            out_row += 1
+            continue
+
+        tr_el = tr_els[out_row]
+        tcs = [c for c in tr_el if _local_name(c.tag) == "tc"]
+        rev_tcs = (
+            [c for c in rev_tr_els[ri] if _local_name(c.tag) == "tc"]
+            if ri is not None and ri < len(rev_tr_els)
+            else []
+        )
+
+        if not is_abbrev_tbl:
+            cell_alignment = [(c, c) for c in range(min(len(row_o), len(row_r)))]
+        else:
+            cell_alignment = _align_row_cells(row_o, row_r, config)
+
+        for oc, rc in cell_alignment:
+            cell_idx = rc if rc is not None else (oc if oc is not None else 0)
+            if cell_idx >= len(tcs):
+                if cell_idx < len(rev_tcs):
+                    new_tc = copy.deepcopy(rev_tcs[cell_idx])
+                    tr_el.append(new_tc)
+                    tcs.append(new_tc)
+                else:
+                    continue
+            tc_el = tcs[cell_idx]
+            orig_cell = row_o[oc] if oc is not None else _empty_table_cell()
+            rev_cell = row_r[rc] if rc is not None else _empty_table_cell()
+            _apply_table_cell_track_changes(
+                tc_el,
+                orig_cell,
+                rev_cell,
                 config,
-                id_counter=id_counter,
-                author=author,
-                date_iso=date_iso,
+                id_counter,
+                author,
+                date_iso,
+                major_sentence_mode=is_abbrev_tbl,
             )
-            _replace_p_content_preserving_p_pr(paras[0], new_kids)
-            for extra in paras[1:]:
-                tc_el.remove(extra)
+        out_row += 1
 
 
 def _apply_track_changes_to_structural_container(
@@ -1442,6 +1486,83 @@ def _replace_p_content_preserving_p_pr(p_el: ET.Element, new_children: list[ET.E
             break
     for i, node in enumerate(new_children):
         p_el.insert(insert_at + i, node)
+
+
+def _empty_table_cell() -> dict:
+    """Synthetic empty table cell used for row/cell add/remove emit."""
+
+    return {"paragraphs": []}
+
+
+def _ensure_tc_first_paragraph(tc_el: ET.Element) -> ET.Element:
+    """Return first direct ``w:p`` in ``w:tc``; create one if absent."""
+
+    paras = _tc_direct_paragraph_elements(tc_el)
+    if paras:
+        return paras[0]
+    p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
+    insert_at = 0
+    for i, ch in enumerate(list(tc_el)):
+        if _local_name(ch.tag) == "tcPr":
+            insert_at = i + 1
+            break
+    tc_el.insert(insert_at, p_el)
+    return p_el
+
+
+def _apply_table_cell_track_changes(
+    tc_el: ET.Element,
+    orig_cell: dict,
+    rev_cell: dict,
+    config: CompareConfig,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+    *,
+    major_sentence_mode: bool = False,
+) -> None:
+    """Apply paragraph-style Track Changes for one table cell (merged text view)."""
+
+    orig_para = _cell_concat_paragraph(orig_cell)  # type: ignore[arg-type]
+    rev_para = _cell_concat_paragraph(rev_cell)  # type: ignore[arg-type]
+    if not _paragraph_needs_revision(orig_para, rev_para, config):
+        return
+    orig_text = "".join(str(r.get("text", "")) for r in orig_para.get("runs", []))
+    rev_text = "".join(str(r.get("text", "")) for r in rev_para.get("runs", []))
+    orig_words = [t for t in _word_level_tokens(orig_text) if not t.isspace()]
+    rev_words = [t for t in _word_level_tokens(rev_text) if not t.isspace()]
+    word_overlap = difflib.SequenceMatcher(
+        None, orig_words, rev_words, autojunk=False
+    ).ratio()
+
+    # For table cells, very low-overlap long text should render as full-line
+    # replacement (one del line + one ins line) so Word balloons show the
+    # entire deleted/inserted sentence clearly.
+    if (
+        major_sentence_mode
+        and
+        orig_text
+        and rev_text
+        and min(len(orig_words), len(rev_words)) >= 4
+        and word_overlap < 0.35
+    ):
+        new_kids = [
+            _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+            _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+        ]
+    else:
+        new_kids = build_paragraph_track_change_elements(
+            orig_para,
+            rev_para,
+            config,
+            id_counter=id_counter,
+            author=author,
+            date_iso=date_iso,
+        )
+    first_p = _ensure_tc_first_paragraph(tc_el)
+    _replace_p_content_preserving_p_pr(first_p, new_kids)
+    for extra in _tc_direct_paragraph_elements(tc_el)[1:]:
+        tc_el.remove(extra)
 
 
 def _empty_body_paragraph() -> BodyParagraph:
