@@ -421,6 +421,57 @@ def test_scrum120_cervical_abbreviations_paragraph_before_inserted_table(
     assert terms_i < first_tbl_i < rev_heading_i
 
 
+def test_scrum131_cervical_abbreviations_table_diffs_in_place_not_whole_table_insert(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-131: abbreviation table should stay in place with row/cell-level revisions."""
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum131_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    children = list(body)
+
+    terms_i = next(
+        (
+            i
+            for i, ch in enumerate(children)
+            if _local_name(ch.tag) == "p"
+            and "Terms describing racial and ethnic categories" in _collect_t_text(ch)
+        ),
+        None,
+    )
+    assert terms_i is not None
+
+    first_table_idx = next(
+        (
+            i
+            for i, ch in enumerate(children)
+            if i > terms_i
+            and (
+                _local_name(ch.tag) == "tbl"
+                or (_local_name(ch.tag) == "ins" and ch.find("w:tbl", NS) is not None)
+            )
+        ),
+        None,
+    )
+    assert first_table_idx is not None
+    first_table_container = children[first_table_idx]
+    assert _local_name(first_table_container.tag) == "tbl"
+    assert first_table_container.find(".//w:ins", NS) is not None
+
+
 def test_scrum130_merges_two_paragraph_intros_then_list_bullets(
     tmp_path: Path,
 ) -> None:
@@ -570,6 +621,166 @@ def test_emit_table_cell_text_change_has_revision_markers(tmp_path: Path) -> Non
     assert len(root.findall(".//w:tbl", NS)) == 1
     assert root.findall(".//w:ins", NS)
     assert root.findall(".//w:del", NS)
+
+
+def test_emit_table_row_addition_keeps_table_and_marks_new_row_inserted(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-131: row additions in matched tables stay row-level, not whole-table replace."""
+    orig_tbl = """
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Abbreviation</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Definition</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+"""
+    rev_tbl = """
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Abbreviation</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Definition</w:t></w:r></w:p></w:tc></w:tr>
+  <w:tr><w:tc><w:p><w:r><w:t>NEW</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>New meaning</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+"""
+    orig = _minimal_docx(tmp_path, orig_tbl, "orig_row_add.docx")
+    rev = _minimal_docx(tmp_path, rev_tbl, "rev_row_add.docx")
+    out = tmp_path / "out_row_add.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+
+    root = load_word_document_xml_root(out)
+    tbls = root.findall(".//w:tbl", NS)
+    assert len(tbls) == 1
+    rows = tbls[0].findall("w:tr", NS)
+    assert len(rows) == 2
+    assert len(rows[0].findall("w:tc", NS)) == 2
+    assert len(rows[1].findall("w:tc", NS)) == 2
+    assert rows[1].findall(".//w:ins", NS)
+    body = root.find(".//w:body", NS)
+    assert body is not None
+    assert not any(
+        _local_name(ch.tag) == "ins" and ch.find("w:tbl", NS) is not None
+        for ch in list(body)
+    )
+
+
+def test_emit_table_middle_row_insert_does_not_replace_following_row(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-131: inserting a middle row should not mark later rows as replaced."""
+    orig_tbl = """
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Alpha</w:t></w:r></w:p></w:tc></w:tr>
+  <w:tr><w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Charlie</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+"""
+    rev_tbl = """
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Alpha</w:t></w:r></w:p></w:tc></w:tr>
+  <w:tr><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Bravo</w:t></w:r></w:p></w:tc></w:tr>
+  <w:tr><w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Charlie</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+"""
+    orig = _minimal_docx(tmp_path, orig_tbl, "orig_row_mid.docx")
+    rev = _minimal_docx(tmp_path, rev_tbl, "rev_row_mid.docx")
+    out = tmp_path / "out_row_mid.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+
+    root = load_word_document_xml_root(out)
+    tbl = root.find(".//w:tbl", NS)
+    assert tbl is not None
+    rows = tbl.findall("w:tr", NS)
+    assert len(rows) == 3
+    assert all(len(r.findall("w:tc", NS)) == 2 for r in rows)
+    assert "B" in _collect_t_text(rows[1]) and rows[1].find(".//w:ins", NS) is not None
+    # Following row should remain unchanged (no revisions inside "C/Charlie" row).
+    assert "CCharlie" in _collect_t_text(rows[2]).replace(" ", "")
+    assert rows[2].find(".//w:ins", NS) is None
+    assert rows[2].find(".//w:del", NS) is None
+
+
+def test_emit_table_cell_major_sentence_replace_emits_full_del_and_full_ins(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-131: major sentence replacement should appear as full-line del/ins."""
+    orig_tbl = """
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+      <w:tc><w:p><w:r><w:t>This sentence describes the original clinical endpoint clearly.</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+"""
+    rev_tbl = """
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+      <w:tc><w:p><w:r><w:t>A completely different sentence explains another safety objective now.</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+"""
+    orig = _minimal_docx(tmp_path, orig_tbl, "orig_major_replace.docx")
+    rev = _minimal_docx(tmp_path, rev_tbl, "rev_major_replace.docx")
+    out = tmp_path / "out_major_replace.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+
+    root = load_word_document_xml_root(out)
+    tbl = root.find(".//w:tbl", NS)
+    assert tbl is not None
+    # Second cell should carry one full deleted sentence and one full inserted sentence.
+    row = tbl.findall("w:tr", NS)[0]
+    tc = row.findall("w:tc", NS)[1]
+    dels = tc.findall(".//w:del", NS)
+    ins = tc.findall(".//w:ins", NS)
+    assert len(dels) == 1
+    assert len(ins) == 1
+    assert "original clinical endpoint" in _collect_del_text(dels[0])
+    assert "different sentence explains another safety objective" in _collect_t_text(ins[0])
+
+
+def test_emit_table_diff_preserves_neighbor_paragraph_spacing(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-131: table diffs must not alter spacing before/after neighboring paragraphs."""
+    orig_body = """
+<w:p>
+  <w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>
+  <w:r><w:t>Before table</w:t></w:r>
+</w:p>
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Key</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Old sentence for value</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+<w:p>
+  <w:pPr><w:spacing w:before="60" w:after="300"/></w:pPr>
+  <w:r><w:t>After table</w:t></w:r>
+</w:p>
+"""
+    rev_body = """
+<w:p>
+  <w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>
+  <w:r><w:t>Before table</w:t></w:r>
+</w:p>
+<w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Key</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>New sentence for value that changed</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+<w:p>
+  <w:pPr><w:spacing w:before="60" w:after="300"/></w:pPr>
+  <w:r><w:t>After table</w:t></w:r>
+</w:p>
+"""
+    orig = _minimal_docx(tmp_path, orig_body, "orig_spacing.docx")
+    rev = _minimal_docx(tmp_path, rev_body, "rev_spacing.docx")
+    out = tmp_path / "out_spacing.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    children = list(body)
+    # Expect exactly: paragraph, table, paragraph (no extra spacing paragraphs).
+    assert [_local_name(ch.tag) for ch in children[:3]] == ["p", "tbl", "p"]
+
+    p_before = children[0]
+    p_after = children[2]
+    spacing_before = p_before.find("w:pPr/w:spacing", NS)
+    spacing_after = p_after.find("w:pPr/w:spacing", NS)
+    assert spacing_before is not None
+    assert spacing_after is not None
+    assert spacing_before.get(f"{{{WORD_NS}}}before") == "240"
+    assert spacing_before.get(f"{{{WORD_NS}}}after") == "120"
+    assert spacing_after.get(f"{{{WORD_NS}}}before") == "60"
+    assert spacing_after.get(f"{{{WORD_NS}}}after") == "300"
 
 
 def test_write_docx_copy_with_part_replacements_overrides(tmp_path: Path) -> None:
