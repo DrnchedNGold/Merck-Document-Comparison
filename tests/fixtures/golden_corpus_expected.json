@@ -4,8 +4,8 @@
     "email1-bladder": {
       "by_part": {
         "word/document.xml": {
-          "del": 55,
-          "ins": 63
+          "del": 57,
+          "ins": 67
         },
         "word/footer1.xml": {
           "del": 0,
@@ -26,8 +26,8 @@
       },
       "summary": {
         "document": {
-          "del": 55,
-          "ins": 63
+          "del": 57,
+          "ins": 67
         },
         "footers": {
           "del": 0,
@@ -42,8 +42,8 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 395,
-          "ins": 495
+          "del": 405,
+          "ins": 540
         },
         "word/footer1.xml": {
           "del": 0,
@@ -56,8 +56,8 @@
       },
       "summary": {
         "document": {
-          "del": 395,
-          "ins": 495
+          "del": 405,
+          "ins": 540
         },
         "footers": {
           "del": 0,
@@ -118,8 +118,8 @@
     "email3-ib-10-11": {
       "by_part": {
         "word/document.xml": {
-          "del": 4206,
-          "ins": 8023
+          "del": 4272,
+          "ins": 8058
         },
         "word/footer1.xml": {
           "del": 0,
@@ -360,8 +360,8 @@
       },
       "summary": {
         "document": {
-          "del": 4206,
-          "ins": 8023
+          "del": 4272,
+          "ins": 8058
         },
         "footers": {
           "del": 2,
@@ -376,8 +376,8 @@
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 2115,
-          "ins": 10793
+          "del": 2122,
+          "ins": 10822
         },
         "word/footer1.xml": {
           "del": 2,
@@ -602,8 +602,8 @@
       },
       "summary": {
         "document": {
-          "del": 2115,
-          "ins": 10793
+          "del": 2122,
+          "ins": 10822
         },
         "footers": {
           "del": 4,

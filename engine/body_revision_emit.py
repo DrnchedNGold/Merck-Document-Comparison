@@ -56,7 +56,13 @@ from .docx_package_parts import (
     discover_header_footer_part_paths_from_namelist,
 )
 from .ooxml_namespace import serialize_ooxml_part
-from .table_diff import _align_row_cells, _align_table_rows, _cell_concat_paragraph
+from .table_diff import (
+    _align_row_cells,
+    _align_table_rows,
+    _cell_concat_paragraph,
+    _is_abbreviation_definition_table,
+    _table_shape,
+)
 
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 NS = {"w": WORD_NAMESPACE}
@@ -1181,12 +1187,25 @@ def _apply_matched_table_track_changes(
     replacement.
     """
 
-    tr_els = _tbl_tr_elements(tbl_el)
     rows_o = orig_table.get("rows", [])
     rows_r = rev_table.get("rows", [])
+    is_abbrev_tbl = _is_abbreviation_definition_table(rows_o, rows_r, config)
+
+    # Keep legacy behavior for non-target tables to avoid broad output drift.
+    if not is_abbrev_tbl and _table_shape(orig_table) != _table_shape(rev_table):
+        if revised_tbl_el is not None:
+            _replace_body_child_element(
+                container, tbl_el, copy.deepcopy(revised_tbl_el)
+            )
+        return
+
+    tr_els = _tbl_tr_elements(tbl_el)
     rev_tr_els = _tbl_tr_elements(revised_tbl_el) if revised_tbl_el is not None else []
 
-    row_alignment = _align_table_rows(rows_o, rows_r, config)
+    if not is_abbrev_tbl:
+        row_alignment = [(i, i) for i in range(min(len(rows_o), len(rows_r)))]
+    else:
+        row_alignment = _align_table_rows(rows_o, rows_r, config)
     out_row = 0
     for oi, ri in row_alignment:
         row_o = rows_o[oi] if oi is not None else []
@@ -1214,7 +1233,12 @@ def _apply_matched_table_track_changes(
             else []
         )
 
-        for oc, rc in _align_row_cells(row_o, row_r, config):
+        if not is_abbrev_tbl:
+            cell_alignment = [(c, c) for c in range(min(len(row_o), len(row_r)))]
+        else:
+            cell_alignment = _align_row_cells(row_o, row_r, config)
+
+        for oc, rc in cell_alignment:
             cell_idx = rc if rc is not None else (oc if oc is not None else 0)
             if cell_idx >= len(tcs):
                 if cell_idx < len(rev_tcs):
@@ -1234,6 +1258,7 @@ def _apply_matched_table_track_changes(
                 id_counter,
                 author,
                 date_iso,
+                major_sentence_mode=is_abbrev_tbl,
             )
         out_row += 1
 
@@ -1493,6 +1518,8 @@ def _apply_table_cell_track_changes(
     id_counter: list[int],
     author: str,
     date_iso: str,
+    *,
+    major_sentence_mode: bool = False,
 ) -> None:
     """Apply paragraph-style Track Changes for one table cell (merged text view)."""
 
@@ -1512,6 +1539,8 @@ def _apply_table_cell_track_changes(
     # replacement (one del line + one ins line) so Word balloons show the
     # entire deleted/inserted sentence clearly.
     if (
+        major_sentence_mode
+        and
         orig_text
         and rev_text
         and min(len(orig_words), len(rev_words)) >= 4

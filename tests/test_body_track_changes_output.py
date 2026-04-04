@@ -665,12 +665,14 @@ def test_emit_table_middle_row_insert_does_not_replace_following_row(
     """SCRUM-131: inserting a middle row should not mark later rows as replaced."""
     orig_tbl = """
 <w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Abbreviation</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Definition</w:t></w:r></w:p></w:tc></w:tr>
   <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Alpha</w:t></w:r></w:p></w:tc></w:tr>
   <w:tr><w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Charlie</w:t></w:r></w:p></w:tc></w:tr>
 </w:tbl>
 """
     rev_tbl = """
 <w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Abbreviation</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Definition</w:t></w:r></w:p></w:tc></w:tr>
   <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Alpha</w:t></w:r></w:p></w:tc></w:tr>
   <w:tr><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Bravo</w:t></w:r></w:p></w:tc></w:tr>
   <w:tr><w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Charlie</w:t></w:r></w:p></w:tc></w:tr>
@@ -685,13 +687,13 @@ def test_emit_table_middle_row_insert_does_not_replace_following_row(
     tbl = root.find(".//w:tbl", NS)
     assert tbl is not None
     rows = tbl.findall("w:tr", NS)
-    assert len(rows) == 3
+    assert len(rows) == 4
     assert all(len(r.findall("w:tc", NS)) == 2 for r in rows)
-    assert "B" in _collect_t_text(rows[1]) and rows[1].find(".//w:ins", NS) is not None
+    assert "B" in _collect_t_text(rows[2]) and rows[2].find(".//w:ins", NS) is not None
     # Following row should remain unchanged (no revisions inside "C/Charlie" row).
-    assert "CCharlie" in _collect_t_text(rows[2]).replace(" ", "")
-    assert rows[2].find(".//w:ins", NS) is None
-    assert rows[2].find(".//w:del", NS) is None
+    assert "CCharlie" in _collect_t_text(rows[3]).replace(" ", "")
+    assert rows[3].find(".//w:ins", NS) is None
+    assert rows[3].find(".//w:del", NS) is None
 
 
 def test_emit_table_cell_major_sentence_replace_emits_full_del_and_full_ins(
@@ -700,12 +702,16 @@ def test_emit_table_cell_major_sentence_replace_emits_full_del_and_full_ins(
     """SCRUM-131: major sentence replacement should appear as full-line del/ins."""
     orig_tbl = """
 <w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Abbreviation</w:t></w:r></w:p></w:tc>
+      <w:tc><w:p><w:r><w:t>Definition</w:t></w:r></w:p></w:tc></w:tr>
   <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
       <w:tc><w:p><w:r><w:t>This sentence describes the original clinical endpoint clearly.</w:t></w:r></w:p></w:tc></w:tr>
 </w:tbl>
 """
     rev_tbl = """
 <w:tbl>
+  <w:tr><w:tc><w:p><w:r><w:t>Abbreviation</w:t></w:r></w:p></w:tc>
+      <w:tc><w:p><w:r><w:t>Definition</w:t></w:r></w:p></w:tc></w:tr>
   <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
       <w:tc><w:p><w:r><w:t>A completely different sentence explains another safety objective now.</w:t></w:r></w:p></w:tc></w:tr>
 </w:tbl>
@@ -719,7 +725,7 @@ def test_emit_table_cell_major_sentence_replace_emits_full_del_and_full_ins(
     tbl = root.find(".//w:tbl", NS)
     assert tbl is not None
     # Second cell should carry one full deleted sentence and one full inserted sentence.
-    row = tbl.findall("w:tr", NS)[0]
+    row = tbl.findall("w:tr", NS)[1]
     tc = row.findall("w:tc", NS)[1]
     dels = tc.findall(".//w:del", NS)
     ins = tc.findall(".//w:ins", NS)

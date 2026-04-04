@@ -34,6 +34,21 @@ def _table_shape(table: BodyTable) -> tuple[int, list[int]]:
     return nrows, widths
 
 
+def _serialize_table_texts(table: BodyTable) -> str:
+    """Stable serialization for whole-table replace fallback."""
+
+    lines: list[str] = []
+    for row in table.get("rows", []):
+        cells: list[str] = []
+        for cell in row:
+            parts: list[str] = []
+            for para in cell.get("paragraphs", []):
+                parts.append("".join(str(r.get("text", "")) for r in para.get("runs", [])))
+            cells.append("\n".join(parts))
+        lines.append("|".join(cells))
+    return "\n".join(lines)
+
+
 def _empty_cell() -> BodyTableCell:
     """Synthetic empty cell used for row/column additions/removals."""
 
@@ -106,6 +121,35 @@ def _is_abbrev_like_key(key: str) -> bool:
     return bool(re.search(r"[A-Z]", key))
 
 
+def _is_abbreviation_definition_table(
+    rows_o: list[list[BodyTableCell]],
+    rows_r: list[list[BodyTableCell]],
+    config: CompareConfig,
+) -> bool:
+    """
+    Detect glossary-style tables (Abbreviation | Definition).
+
+    Restricts key-based row identity matching to the SCRUM-131 target shape so
+    other tables keep baseline alignment behavior.
+    """
+
+    def _header_cells(rows: list[list[BodyTableCell]]) -> list[str]:
+        if not rows:
+            return []
+        return [
+            _normalize_text(_cell_text(c), config).strip().lower() for c in rows[0][:2]
+        ]
+
+    h_o = _header_cells(rows_o)
+    h_r = _header_cells(rows_r)
+    def _looks(h: list[str]) -> bool:
+        if len(h) < 2:
+            return False
+        return "abbreviation" in h[0] and "definition" in h[1]
+
+    return _looks(h_o) or _looks(h_r)
+
+
 def _align_table_rows(
     rows_o: list[list[BodyTableCell]],
     rows_r: list[list[BodyTableCell]],
@@ -113,6 +157,9 @@ def _align_table_rows(
 ) -> list[tuple[int | None, int | None]]:
     sig_o = [_row_signature(row, config) for row in rows_o]
     sig_r = [_row_signature(row, config) for row in rows_r]
+    if not _is_abbreviation_definition_table(rows_o, rows_r, config):
+        return _alignment_from_signatures(sig_o, sig_r)
+
     key_o = [_row_primary_key(row, config) for row in rows_o]
     key_r = [_row_primary_key(row, config) for row in rows_r]
 
@@ -200,14 +247,33 @@ def diff_table_blocks(
     ``blocks/{block_index}/rows/{r}/cells/{c}/inline/{n}`` granularity.
     """
 
-    ops: list[DiffOp] = []
     rows_o = original.get("rows", [])
     rows_r = revised.get("rows", [])
-    for oi, ri in _align_table_rows(rows_o, rows_r, config):
+    is_abbrev_tbl = _is_abbreviation_definition_table(rows_o, rows_r, config)
+    if not is_abbrev_tbl and _table_shape(original) != _table_shape(revised):
+        return [
+            {
+                "op": "replace",
+                "path": f"blocks/{block_index}/table",
+                "before": _serialize_table_texts(original),
+                "after": _serialize_table_texts(revised),
+            }
+        ]
+
+    ops: list[DiffOp] = []
+    if not is_abbrev_tbl:
+        row_pairs = [(i, i) for i in range(min(len(rows_o), len(rows_r)))]
+    else:
+        row_pairs = _align_table_rows(rows_o, rows_r, config)
+    for oi, ri in row_pairs:
         row_o = rows_o[oi] if oi is not None else []
         row_r = rows_r[ri] if ri is not None else []
         row_idx = ri if ri is not None else (oi if oi is not None else 0)
-        for oc, rc in _align_row_cells(row_o, row_r, config):
+        if not is_abbrev_tbl:
+            cell_pairs = [(c, c) for c in range(min(len(row_o), len(row_r)))]
+        else:
+            cell_pairs = _align_row_cells(row_o, row_r, config)
+        for oc, rc in cell_pairs:
             cell_o = row_o[oc] if oc is not None else _empty_cell()
             cell_r = row_r[rc] if rc is not None else _empty_cell()
             cell_idx = rc if rc is not None else (oc if oc is not None else 0)
