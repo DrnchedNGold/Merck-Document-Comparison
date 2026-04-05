@@ -1,0 +1,13 @@
+%% Minimal flow for slides, Confluence, or GitHub Mermaid renderers.
+%% Full seven-step visual: stakeholder-seven-step.svg (same folder).
+
+flowchart LR
+  O[(Original .docx)]
+  R[(Revised .docx)]
+  ENG[Comparison engine<br/>validate · ingest · align · diff · emit]
+  OUT[(New .docx<br/>Track Changes on)]
+
+  O --> ENG
+  R --> ENG
+  CFG[Optional JSON<br/>compare profile] -.->|tunes behavior| ENG
+  ENG --> OUT

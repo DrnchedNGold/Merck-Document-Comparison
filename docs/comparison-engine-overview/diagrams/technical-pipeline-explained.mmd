@@ -1,0 +1,67 @@
+%% Same topology as technical-pipeline.mmd - labels describe *what* each step does
+%% (aligned with engine/compare_cli.py, preflight_validation.py, body_revision_emit.py).
+%% Module/function names: see technical-pipeline.mmd
+
+flowchart TB
+  subgraph Entry["1. Command-line entry"]
+    A[Read paths: original / revised / output · optional author and date] --> B{JSON settings file given?}
+    B -->|yes| C[Load JSON and check every key is a known compare option]
+    B -->|no| D[Use built-in Word-like defaults - e.g. ignore formatting noise by default]
+    C --> E[Start the compare run]
+    D --> E
+  end
+
+  subgraph Preflight["2. Preflight - each input document"]
+    E --> F["Original path: lowercase extension must be .docx · then confirm the bytes form a zip · open document.xml and header/footer XML · reject if any w:ins/w:del · comment markers · or word/comments.xml"]
+    F --> G["Revised: run the same validation end to end"]
+    G --> H{Both documents pass?}
+    H -->|no| H1[Stop with preflight error - no output file]
+    H -->|yes| EmitStart
+  end
+
+  subgraph Emit["3. Load both documents into comparable structure"]
+    EmitStart[Unzip both .docx packages] --> P1["Original: walk document + headers/footers → ordered blocks - each block is a paragraph or table with run text"]
+    EmitStart --> P2["Revised: same structure so A and B line up"]
+    P1 --> P3[Keep original-side IR for body and each H/F part]
+    P2 --> P4[Keep revised-side IR the same way]
+    P1 --> IngestNote["Inside a paragraph: read runs in order - text from w:t · tabs from w:tab become tab characters · breaks become newlines"]
+    P3 --> Prep
+    P4 --> Prep
+    Prep[Prepare emit state] --> ID["One shared revision id counter for the whole package so Word sees a single change stream"]
+    Prep --> RD["From revised zip: remember raw paragraph/table order per part - needed when inserting styled or TOC lines"]
+    RD --> DOC[Parse original document.xml into a live XML tree to edit in place]
+    DOC --> APPLYDOC[Apply track changes to the body tree using both IRs]
+  end
+
+  subgraph Body["4. Document body - align then diff"]
+    APPLYDOC --> AL[Line up paragraph and table sequences between sides - like a smart merge of block lists not a flat character diff]
+    AL --> BL[For each alignment outcome: paired blocks · or only on one side]
+    BL --> TBL{Is this block a table?}
+    TBL -->|yes| TD[Compare the grid - rows and cells - instead of one long string]
+    TBL -->|no| PARA[Both sides are the same paragraph slot]
+    PARA --> TOC{TOC-style paragraph?}
+    TOC -->|yes| TOCE[Keep tab characters in the text so page numbers do not glue to headings when whitespace is ignored elsewhere]
+    TOC -->|no| PARB[Split text into word and whitespace chunks · diff those lists · optionally refine big replacements]
+    TOCE --> XML1[Rewrite the w:p subtree: normal runs plus w:ins / w:del wrapping changed spans]
+    PARB --> XML1
+    TD --> XML1
+    BL --> INS[Paragraph or table only in revised → wrap as an insertion in the XML]
+    BL --> DEL[Paragraph or table only in original → wrap as a deletion]
+    XML1 --> SERDOC[Turn the updated body tree back into XML bytes for the output package]
+    INS --> SERDOC
+    DEL --> SERDOC
+  end
+
+  subgraph HF["5. Headers and footers"]
+    SERDOC --> HFLOOP[For every header and footer file that exists on the original]
+    HFLOOP --> HFAPP[Same align-and-diff logic as the body · share the same revision id counter]
+    HFAPP --> SERHF[Serialize each updated part into the replacement map]
+  end
+
+  subgraph Out["6. Write the output file"]
+    SERHF --> WZIP["Stream-copy the original .docx as the shell - replace only document.xml and the header/footer XML you rebuilt"]
+    WZIP --> OUT[Result is a new .docx: styles · images · unrelated parts unchanged]
+  end
+
+  H1 --> XFail[CLI maps to preflight exit code e.g. 10 - no output file]
+  OUT --> Z[Success exit]

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 885" width="720" height="885" font-family="system-ui,Segoe UI,Roboto,sans-serif" font-size="10.5">
+  <defs>
+    <marker id="ar" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/></marker>
+    <filter id="s" x="-2%" y="-2%" width="104%" height="104%"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.08"/></filter>
+    <style><![CDATA[
+      .t { font-size: 15px; font-weight: 800; fill: #0f172a; letter-spacing: -0.02em; }
+      .u { font-size: 9.5px; fill: #64748b; }
+      .chip { fill: #e0f2fe; stroke: #0284c7; stroke-width: 1.2; rx: 5; filter: url(#s); }
+      .chipt { font-size: 9px; font-weight: 700; fill: #0369a1; }
+      .st { font-size: 11.5px; font-weight: 800; fill: #fff; }
+      .n1 { fill: #2563eb; }
+      .n2 { fill: #4f46e5; }
+      .n3 { fill: #7c3aed; }
+      .n4 { fill: #9333ea; }
+      .n5 { fill: #c026d3; }
+      .n6 { fill: #db2777; }
+      .n7 { fill: #e11d48; }
+      .badge { rx: 6; }
+      .card { fill: #fafafa; stroke: #e2e8f0; stroke-width: 1.2; rx: 10; filter: url(#s); }
+      .b { fill: #334155; font-size: 10px; }
+      .callout { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.2; stroke-dasharray: 4 3; rx: 8; }
+      .co { font-size: 9.5px; fill: #78350f; font-weight: 700; }
+      .co2 { font-size: 9.5px; fill: #92400e; }
+      .ln { stroke: #94a3b8; stroke-width: 1.2; fill: none; marker-end: url(#ar); }
+      .ln2 { stroke: #cbd5e1; stroke-width: 1.5; fill: none; marker-end: url(#ar); }
+      .res { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; rx: 10; }
+      .rt { font-size: 11px; font-weight: 800; fill: #047857; }
+      .rb { font-size: 10px; fill: #065f46; }
+      .ft { font-size: 8.5px; fill: #94a3b8; }
+    ]]></style>
+  </defs>
+
+  <text x="360" y="28" text-anchor="middle" class="t">Comparison engine</text>
+  <text x="360" y="44" text-anchor="middle" class="u">external inputs � internal stages � smallest-scale diff inside Step 5</text>
+
+  <!-- External strip -->
+  <text x="36" y="66" class="u" font-weight="700" fill="#475569">Outside the engine</text>
+  <rect class="chip" x="36" y="72" width="118" height="28"/><text x="95" y="89" text-anchor="middle" class="chipt">original path</text>
+  <rect class="chip" x="162" y="72" width="118" height="28"/><text x="221" y="89" text-anchor="middle" class="chipt">revised path</text>
+  <rect class="chip" x="288" y="72" width="118" height="28"/><text x="347" y="89" text-anchor="middle" class="chipt">output path</text>
+  <rect class="chip" x="414" y="72" width="132" height="28"/><text x="480" y="89" text-anchor="middle" class="chipt">settings JSON (opt.)</text>
+  <rect class="chip" x="554" y="72" width="130" height="28"/><text x="619" y="89" text-anchor="middle" class="chipt">author / date (opt.)</text>
+
+  <line class="ln2" x1="360" y1="108" x2="360" y2="124"/>
+
+  <!-- Step 1 -->
+  <rect class="badge n1" x="36" y="124" width="28" height="22" rx="5"/><text x="50" y="139" text-anchor="middle" class="st" font-size="11">1</text>
+  <rect class="card" x="72" y="118" width="612" height="52"/>
+  <text x="86" y="136" class="b" font-weight="800" fill="#1e40af">Load paths + profile</text>
+  <text x="86" y="152" class="b">defaults if no JSON � bad config � stop, no file written</text>
+  <line class="ln2" x1="360" y1="170" x2="360" y2="186"/>
+
+  <!-- Step 2 -->
+  <rect class="badge n2" x="36" y="186" width="28" height="22" rx="5"/><text x="50" y="201" text-anchor="middle" class="st" font-size="11">2</text>
+  <rect class="card" x="72" y="180" width="612" height="52"/>
+  <text x="86" y="198" class="b" font-weight="800" fill="#312e81">Preflight both .docx</text>
+  <text x="86" y="214" class="b">valid zip/package � reject if Track Changes or comments already present � abort = no output</text>
+  <line class="ln2" x1="360" y1="232" x2="360" y2="248"/>
+
+  <!-- Step 3 -->
+  <rect class="badge n3" x="36" y="248" width="28" height="22" rx="5"/><text x="50" y="263" text-anchor="middle" class="st" font-size="11">3</text>
+  <rect class="card" x="72" y="242" width="612" height="68"/>
+  <text x="86" y="260" class="b" font-weight="800" fill="#5b21b6">Extract � two parallel models (A &amp; B)</text>
+  <text x="86" y="276" class="b">body + headers + footers � ordered blocks: paragraphs + tables</text>
+  <text x="86" y="292" class="b">per paragraph: run text in order; tabs from Word � tab char in string (layout preserved)</text>
+  <line class="ln2" x1="360" y1="310" x2="360" y2="326"/>
+
+  <!-- Step 4 -->
+  <rect class="badge n4" x="36" y="326" width="28" height="22" rx="5"/><text x="50" y="341" text-anchor="middle" class="st" font-size="11">4</text>
+  <rect class="card" x="72" y="320" width="612" height="56"/>
+  <text x="86" y="338" class="b" font-weight="800" fill="#6b21a8">Align blocks (coarse)</text>
+  <text x="86" y="354" class="b">match paragraph/table sequences (signatures + compare options) � not whole-doc char diff</text>
+  <text x="86" y="370" class="b">only-in-B � insert block � only-in-A � delete block � pairs � fine diff next</text>
+  <line class="ln2" x1="360" y1="376" x2="360" y2="392"/>
+
+  <!-- Step 5 + callout -->
+  <rect class="badge n5" x="36" y="392" width="28" height="22" rx="5"/><text x="50" y="407" text-anchor="middle" class="st" font-size="11">5</text>
+  <rect class="card" x="72" y="386" width="612" height="40"/>
+  <text x="86" y="404" class="b" font-weight="800" fill="#a21caf">Fine diff inside each matched block</text>
+  <text x="86" y="420" class="b">see detail panel � � repeats for body + each header/footer</text>
+
+  <rect class="callout" x="72" y="432" width="612" height="198"/>
+  <text x="86" y="452" class="co">Smallest scale (how comparison runs)</text>
+  <text x="86" y="470" class="co2">" Paragraphs: one string per side � split into <tspan font-weight="800">tokens</tspan> = word-ish chunks OR whitespace runs (regex <tspan font-family="monospace" font-size="8.5px">\S+|\s+</tspan>)</text>
+  <text x="86" y="488" class="co2">" <tspan font-weight="800">Not</tspan> letter-by-letter on the full document; sequence-compare the <tspan font-weight="800">token lists</tspan> � equal / insert / delete / replace spans</text>
+  <text x="86" y="506" class="co2">" Big ugly replace � optional inner pass on words only � smaller balloons</text>
+  <text x="86" y="528" class="co">TOC-style lines</text>
+  <text x="86" y="544" class="co2">" keep tab in string even when ignore whitespace elsewhere � page # vs heading text stay separated</text>
+  <text x="86" y="566" class="co">Tables</text>
+  <text x="86" y="582" class="co2">" grid diff (rows/cells) � not one long flattened string</text>
+  <text x="86" y="604" class="co2">" output here: internal list of text spans to mark + /  (not XML yet)</text>
+
+  <line class="ln2" x1="360" y1="638" x2="360" y2="654"/>
+
+  <!-- Step 6 -->
+  <rect class="badge n6" x="36" y="654" width="28" height="22" rx="5"/><text x="50" y="669" text-anchor="middle" class="st" font-size="11">6</text>
+  <rect class="card" x="72" y="648" width="612" height="68"/>
+  <text x="86" y="666" class="b" font-weight="800" fill="#be185d">Emit Track Changes XML</text>
+  <text x="86" y="682" class="b">wrap spans as Word insert/delete nodes � unchanged = normal runs</text>
+  <text x="86" y="698" class="b">markup grain H Step 5 tokens (not arbitrary single chars unless token is one char)</text>
+  <text x="86" y="714" class="b">one rising <tspan font-weight="800">revision id</tspan> stream across body + all H/F � + author + timestamp from Step 1 strip</text>
+  <line class="ln2" x1="360" y1="716" x2="360" y2="732"/>
+
+  <!-- Step 7 -->
+  <rect class="badge n7" x="36" y="732" width="28" height="22" rx="5"/><text x="50" y="747" text-anchor="middle" class="st" font-size="11">7</text>
+  <rect class="card" x="72" y="726" width="612" height="56"/>
+  <text x="86" y="744" class="b" font-weight="800" fill="#be123c">Package write</text>
+  <text x="86" y="760" class="b">stream-copy <tspan font-weight="800">original</tspan> .docx (external template) � replace only body + header/footer XML parts built in 6</text>
+  <text x="86" y="776" class="b">styles � images � rest of package untouched � write to output path</text>
+
+  <line class="ln2" x1="360" y1="782" x2="360" y2="798"/>
+
+  <rect class="res" x="72" y="798" width="612" height="44"/>
+  <text x="86" y="818" class="rt">Out</text>
+  <text x="140" y="818" class="rb">new .docx � Track Changes on � review in Word like any redline</text>
+
+  <text x="360" y="868" text-anchor="middle" class="ft">docs/comparison-engine-overview  technical-pipeline.mmd � ../README.md</text>
+</svg>

@@ -1,0 +1,67 @@
+%% Merck-Document-Comparison - comparison engine (module-level pipeline).
+%% Stakeholder one-pager + SVG: ../README.md and stakeholder-seven-step.svg
+%% Plain-language narrative: ../README.md (and docs/ENGINE-PIPELINE-DIAGRAM.md if present)
+
+flowchart TB
+  subgraph Entry["1. CLI entry - engine/compare_cli.py"]
+    A[main parses argv] --> B{--config path?}
+    B -->|yes| C[Read JSON → validate_compare_config]
+    B -->|no| D[DEFAULT_WORD_LIKE_COMPARE_CONFIG.copy]
+    C --> E[run_compare]
+    D --> E
+  end
+
+  subgraph Preflight["2. Preflight - engine/preflight_validation.py"]
+    E --> F[validate_docx_for_preflight original]
+    F --> G[validate_docx_for_preflight revised]
+    G --> H{Passes?}
+    H -->|no| H1[PreflightValidationError → exit 10 class]
+    H -->|yes| EmitStart
+  end
+
+  subgraph Emit["3. Package emit - engine/body_revision_emit.emit_docx_with_package_track_changes"]
+    EmitStart[Parse both packages into IR] --> P1["parse_docx_document_package(original) - zip: word/document.xml + header/footer parts → BodyIR"]
+    EmitStart --> P2["parse_docx_document_package(revised) - same shape for B-side"]
+    P1 --> P3[orig_pkg document + header_footer map]
+    P2 --> P4[rev_pkg document + header_footer map]
+    P1 --> IngestNote["Ingest detail: docx_body_ingest - w:r children in order: w:t text; w:tab/w:ptab → \\t; w:br/w:cr → newline"]
+    P3 --> Prep
+    P4 --> Prep
+    Prep[Prepare shared revision state] --> ID["id_counter [0] - one shared w:id sequence for whole package MDC-011"]
+    Prep --> RD["From revised zip load_structural_block_elements: ordered w:p/w:tbl per part - for TOC or DOM-aware inserts"]
+    RD --> DOC[Read original word/document.xml bytes → parse XML root]
+    DOC --> APPLYDOC[apply_body_track_changes_to_document_root]
+  end
+
+  subgraph Body["4. Document body - apply_body_track_changes_to_document_root"]
+    APPLYDOC --> AL[align_paragraphs LCS on block-level signatures - engine/paragraph_alignment.py]
+    AL --> BL[Walk each alignment step: matched w:p / inserted / deleted / tables]
+    BL --> TBL{Block is table?}
+    TBL -->|yes| TD[Table-aware paths - diff_table_blocks / structural replace engine/table_diff.py]
+    TBL -->|no| PARA[Matched paragraph pair]
+    PARA --> TOC{Paragraph style TOC* ?}
+    TOC -->|yes| TOCE[_build_toc_matched_line_track_change_elements - preserve tab leaders vs ignore_whitespace SCRUM-112]
+    TOC -->|no| PARB[build_paragraph_track_change_elements - token-level ins/del/replace]
+    TOCE --> XML1[_replace_p_content_preserving_p_pr - inject w:r w:ins w:del under w:p]
+    PARB --> XML1
+    TD --> XML1
+    BL --> INS[Inserted-only revised blocks → new w:p wrapped in w:ins or TOC-aware insert]
+    BL --> DEL[Deleted-only original blocks → w:del subtree]
+    XML1 --> SERDOC[serialize_ooxml_part → replacements word/document.xml]
+    INS --> SERDOC
+    DEL --> SERDOC
+  end
+
+  subgraph HF["5. Headers and footers"]
+    SERDOC --> HFLOOP[For each header/footer part in original zip]
+    HFLOOP --> HFAPP[apply_track_changes_to_hdr_ftr_root - same alignment + emit pattern]
+    HFAPP --> SERHF[serialize each part → replacements dict]
+  end
+
+  subgraph Out["6. Output package - engine/docx_output_package.py"]
+    SERHF --> WZIP["write_docx_copy_with_part_replacements - copy original zip, replace only listed parts"]
+    WZIP --> OUT["output .docx - baseline OOXML shell preserved"]
+  end
+
+  H1 --> XFail[CLI maps to exit 10 etc]
+  OUT --> Z[compare_cli returns exit 0]

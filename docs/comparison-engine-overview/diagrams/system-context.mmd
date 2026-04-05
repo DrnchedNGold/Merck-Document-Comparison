@@ -1,0 +1,22 @@
+%% How the desktop shell relates to the same engine as the CLI.
+
+flowchart TB
+  subgraph User[" "]
+    U[User]
+  end
+
+  subgraph Paths["Ways to run compare"]
+    D[Desktop app<br/>desktop/ - Tk UI]
+    CLI[CLI directly<br/>python -m engine.compare_cli<br/>or merck-compare after install]
+  end
+
+  subgraph Engine["Comparison engine - engine/"]
+    E[Preflight → IR ingest → alignment & diff → Track Changes XML → package write]
+  end
+
+  U --> D
+  U --> CLI
+  D --> SP[Subprocess with repo PYTHONPATH]
+  SP --> E
+  CLI --> E
+  E --> OUT[Output .docx<br/>open in Word]
