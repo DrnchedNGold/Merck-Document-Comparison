@@ -6,15 +6,24 @@ Top-level blocks are aligned with
 when counts and types match; otherwise LCS via :func:`~engine.paragraph_alignment.align_paragraphs`)
 so **new blocks only in the revised document** become
 inserted ``w:p`` elements with ``w:ins``, and paragraphs only in the original become
-full-paragraph ``w:del``. Matched paragraphs use **word/whitespace** tokens (``\\S+`` / ``\\s+``). When a
+full-paragraph ``w:del``. Matched paragraphs use :mod:`engine.diff_tokens` (``\\w+`` / punctuation / ``\\s+``)
+with **case-folded keys** for LCS; surfaces preserve original text for emit. When a
 word-level ``replace`` covers multiple tokens, we **sub-diff again at word level**
 on that span so phrases like ``overall response rate … 12`` vs ``progression-free
 survival … 24`` become separate ``w:del`` / ``w:ins`` markers per word (with shared
 fragments like ``at week`` left as normal text). If a nested replace still has
-multiple words on a side, we diff **word tokens** (``\\S+``) only—never a
+multiple words on a side, we diff :mod:`engine.diff_tokens` again—never a
 character-level matcher on unrelated phrases, which would align stray letters
 and merge the whole clause into one deletion.
+**Single-token** replace spans use **one** ``w:del`` + **one** ``w:ins`` for
+ordinary words (no digits) so we never split inside alphabetic text (avoids
+scrambled output). Character-level prefix/suffix is reserved for
+numeric/metadata tokens (digits present), e.g. ``1.0`` → ``2.0`` (SCRUM-105).
 Inline ``DiffOp`` generation remains character-based in :mod:`engine.inline_run_diff`.
+
+**Debug:** set ``MDC_DEBUG_PARAGRAPH_TC=1`` to print ``repr(orig_text)`` /
+``repr(rev_text)``, per-run concat breakdown, preserving vs concat branch, and
+``SequenceMatcher.get_opcodes()`` for the paragraph token LCS (stderr).
 
 Package-wide emit (SCRUM-64 / MDC-011): ``word/document.xml`` plus each
 ``word/header*.xml`` / ``word/footer*.xml`` present in the original package,
@@ -29,26 +38,46 @@ and extend markup in a dedicated parity task rather than guessing attributes her
 Ingest maps ``w:tab`` inside ``w:r`` to ``\\t`` in run text; emit splits on ``\\t`` and
 outputs ``w:tab`` elements again so TOC lines keep tab stops (dot leaders from ``w:pPr``).
 Matched ``w:p`` with ``TOC*`` styles use :func:`_build_toc_matched_line_track_change_elements`
-(tab-preserving concat when *ignore_whitespace* is True, SCRUM-112). The public
-:func:`build_paragraph_track_change_elements` path is unchanged for non-TOC content.
+(tab-preserving concat when *ignore_whitespace* is True, SCRUM-112). For other matched
+body paragraphs, when the live ``w:p`` matches ingest IR (run count/text and length-preserving
+normalization), :func:`build_paragraph_track_change_elements` uses
+:func:`_try_build_track_changes_preserving_orig_runs`: builds
+:class:`~engine.diff_tokens.StructuredOrigToken` rows (LCS token + owning ``w:r`` +
+offsets) so ``equal`` spans can reuse **deep copies** of whole unchanged ``w:r``
+nodes or slice-clones with preserved ``w:rPr``. Deletes, inserts, and ``replace`` sides
+use ``w:del`` / ``w:ins`` text from joined LCS token surfaces (no ``raw_full[ts:te]`` or
+``rev_text[rs:re_]`` slicing). Otherwise it falls back to the synthetic concat-based builder.
 """
 
 from __future__ import annotations
 
 import copy
 import difflib
+import os
 import re
+import sys
 from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
-from typing import Union
+from typing import Literal, Union
 
 from .compare_keys import _normalize_text
 from .contracts import BodyIR, BodyParagraph, CompareConfig
+from .diff_tokens import (
+    DiffToken,
+    StructuredOrigToken,
+    bounds_from_token_indices,
+    equal_span_surface,
+    maybe_log_lcs_debug,
+    norm_keys,
+    structured_orig_tokens_from_aligned_runs,
+    structured_token_index_bounds_for_global_span,
+    tokenize_for_lcs,
+)
 from .document_package import parse_docx_document_package
+from .docx_body_ingest import WORD_NAMESPACE, _parse_text_from_run_element
 from .paragraph_alignment import alignment_for_track_changes_emit
-from .docx_body_ingest import WORD_NAMESPACE
 from .docx_output_package import write_docx_copy_with_part_replacements
 from .docx_package_parts import (
     DOCUMENT_PART_PATH,
@@ -70,22 +99,260 @@ def _local_name(tag: str) -> str:
     return tag.split("}", maxsplit=1)[-1] if "}" in tag else tag
 
 
+def _paragraph_track_change_build_debug_enabled() -> bool:
+    """True when ``MDC_DEBUG_PARAGRAPH_TC`` requests stderr trace for paragraph TC."""
+
+    v = os.environ.get("MDC_DEBUG_PARAGRAPH_TC", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _debug_log_concat_paragraph_runs(
+    side: str, paragraph: BodyParagraph, config: CompareConfig, joined: str
+) -> None:
+    """Per-run raw + normalized pieces (same order as :func:`_concat_paragraph_text`)."""
+
+    runs = paragraph.get("runs", [])
+    print(
+        f"[MDC_DEBUG_PARAGRAPH_TC] _concat_paragraph_text side={side} "
+        f"n_runs={len(runs)} joined_len={len(joined)} joined={joined!r}",
+        file=sys.stderr,
+    )
+    for i, run in enumerate(runs):
+        raw = str(run.get("text", ""))
+        norm = _normalize_text(raw, config)
+        print(
+            f"[MDC_DEBUG_PARAGRAPH_TC]   run[{i}] raw={raw!r} norm_piece={norm!r} "
+            f"len_raw={len(raw)} len_norm={len(norm)}",
+            file=sys.stderr,
+        )
+
+
+def _debug_log_tc_sequence_opcodes(label: str, orig_text: str, rev_text: str) -> None:
+    """Print ``SequenceMatcher.get_opcodes()`` for the same token LCS as concat emit."""
+
+    ot = tokenize_for_lcs(orig_text)
+    rt = tokenize_for_lcs(rev_text)
+    sm = difflib.SequenceMatcher(None, norm_keys(ot), norm_keys(rt), autojunk=False)
+    opcodes = sm.get_opcodes()
+    print(
+        f"[MDC_DEBUG_PARAGRAPH_TC] SequenceMatcher opcodes ({label}): {opcodes}",
+        file=sys.stderr,
+    )
+    print(f"[MDC_DEBUG_PARAGRAPH_TC]   matcher.ratio()={sm.ratio()}", file=sys.stderr)
+
+
 def _concat_paragraph_text(paragraph: BodyParagraph, config: CompareConfig) -> str:
     return "".join(
         _normalize_text(str(run.get("text", "")), config) for run in paragraph.get("runs", [])
     )
 
 
-def _word_level_tokens(text: str) -> list[str]:
-    """Split into runs of non-whitespace (words, numbers, punctuation clumps) and whitespace."""
-    return re.findall(r"\S+|\s+", text)
+def _paragraph_w_runs_in_document_order(p_el: ET.Element) -> list[ET.Element]:
+    """``w:r`` elements under ``w:p`` in document order (matches body ingest)."""
+
+    return [r for r in p_el.findall(".//w:r", NS) if _parse_text_from_run_element(r)]
+
+
+def _runs_align_with_ir_for_preserving(
+    p_el: ET.Element, orig_para: BodyParagraph, config: CompareConfig
+) -> list[tuple[ET.Element, str]] | None:
+    """
+    Pair each ingest ``w:r`` with IR run text when XML serialization matches IR.
+
+    Returns None when structure does not match (fallback to synthetic emit).
+    """
+
+    runs = _paragraph_w_runs_in_document_order(p_el)
+    iruns = orig_para.get("runs", [])
+    if len(runs) != len(iruns):
+        return None
+    out: list[tuple[ET.Element, str]] = []
+    for r_el, ir in zip(runs, iruns, strict=True):
+        raw = _parse_text_from_run_element(r_el)
+        ir_text = str(ir.get("text", ""))
+        if raw != ir_text:
+            return None
+        norm = _normalize_text(raw, config)
+        if len(norm) != len(raw):
+            return None
+        out.append((r_el, raw))
+    cmp_full = _concat_paragraph_text(orig_para, config)
+    raw_full = "".join(raw for _, raw in out)
+    if len(raw_full) != len(cmp_full):
+        return None
+    if "".join(_normalize_text(r, config) for r in (x[1] for x in out)) != cmp_full:
+        return None
+    return out
+
+
+def _cloned_w_r_sequence_from_template(template_r: ET.Element, text: str) -> list[ET.Element]:
+    """New ``w:r`` nodes copying ``w:rPr`` from *template_r*, with *text* (tabs → ``w:tab``)."""
+
+    if not text:
+        return []
+    r_pr = template_r.find("w:rPr", NS)
+    out: list[ET.Element] = []
+    for i, part in enumerate(text.split("\t")):
+        if i > 0:
+            out.append(_w_tab_run())
+        if not part:
+            continue
+        r_el = ET.Element(f"{{{WORD_NAMESPACE}}}r")
+        if r_pr is not None:
+            r_el.append(copy.deepcopy(r_pr))
+        t_el = ET.SubElement(r_el, f"{{{WORD_NAMESPACE}}}t")
+        if _text_needs_xml_space_preserve(part):
+            t_el.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+        t_el.text = part
+        out.append(r_el)
+    return out
+
+
+def _emit_cloned_runs_for_raw_range(
+    aligned: list[tuple[ET.Element, str]],
+    start: int,
+    end: int,
+) -> list[ET.Element]:
+    """Slice *aligned* run raw strings on ``[start, end)`` and emit cloned ``w:r``."""
+
+    if start >= end:
+        return []
+    out: list[ET.Element] = []
+    pos = 0
+    for r_el, raw in aligned:
+        n = len(raw)
+        lo, hi = max(start, pos), min(end, pos + n)
+        if lo < hi:
+            sub = raw[lo - pos : hi - pos]
+            out.extend(_cloned_w_r_sequence_from_template(r_el, sub))
+        pos += n
+    return out
+
+
+def _emit_structured_equal_runs(struct: list[StructuredOrigToken], lo: int, hi: int) -> list[ET.Element]:
+    """
+    Emit ``w:r`` for an ``equal`` LCS span using per-token ``w:r`` linkage.
+
+    Contiguous tokens from the same source ``w:r`` are merged. When the span is
+    the entire run text, emit a **deep copy** of that ``w:r`` (no string rebuild);
+    otherwise emit clones with ``w:rPr`` preserved via :func:`_cloned_w_r_sequence_from_template`.
+    """
+
+    if lo >= hi:
+        return []
+    out: list[ET.Element] = []
+    g = lo
+    while g < hi:
+        st0 = struct[g]
+        run_el = st0.run_el
+        raw = _parse_text_from_run_element(run_el)
+        r_lo = st0.run_lo
+        r_hi = st0.run_hi
+        h = g + 1
+        while h < hi:
+            stn = struct[h]
+            if stn.run_el is not run_el or stn.run_lo != r_hi:
+                break
+            r_hi = stn.run_hi
+            h += 1
+        if r_lo == 0 and r_hi == len(raw) and raw:
+            out.append(copy.deepcopy(run_el))
+        else:
+            sub = raw[r_lo:r_hi]
+            out.extend(_cloned_w_r_sequence_from_template(run_el, sub))
+        g = h
+    return out
+
+
+def _try_build_track_changes_preserving_orig_runs(
+    p_el: ET.Element,
+    orig_para: BodyParagraph,
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element] | None:
+    """
+    Emit track changes by cloning original ``w:r`` / ``w:t`` for unchanged spans.
+
+    Diff is still word-token based on compare text; only *insert* segments are new
+    ``w:ins`` runs. Deletes use ``w:del`` with ``w:delText`` from joined LCS token
+    surfaces on the original side; inserts from joined revised token surfaces.
+    Falls back to ``None``
+    when DOM and IR diverge or normalization changes string length.
+    """
+
+    aligned = _runs_align_with_ir_for_preserving(p_el, orig_para, config)
+    if aligned is None:
+        return None
+    orig_cmp = _concat_paragraph_text(orig_para, config)
+    rev_text = _concat_paragraph_text(rev_para, config)
+    struct_ot = structured_orig_tokens_from_aligned_runs(aligned, orig_cmp)
+    ot = tokenize_for_lcs(orig_cmp)
+    rt = tokenize_for_lcs(rev_text)
+    sm = difflib.SequenceMatcher(None, norm_keys(ot), norm_keys(rt), autojunk=False)
+    maybe_log_lcs_debug("preserving_paragraph", ot, rt, sm)
+    opcodes = sm.get_opcodes()
+    opcodes = _collapse_adjacent_replace_opcodes(opcodes, ot, rt)
+    opcodes = _refine_replace_boundaries(opcodes, ot, rt)
+    coalesced_suffix = _coalesce_opcodes_at_longest_common_token_suffix(ot, rt, opcodes)
+    if coalesced_suffix is not None:
+        opcodes = coalesced_suffix
+    else:
+        opcodes = _merge_unstable_opcode_regions(opcodes, ot, rt)
+    opcodes = _merge_change_cluster_between_meaningful_equals(opcodes)
+    opcodes = _split_replace_opcodes_on_internal_meaningful_equals(opcodes, ot, rt)
+    opcodes = _left_bias_internal_equal_between_changes(opcodes, ot, rt)
+    opcodes = _pull_meaningful_equal_earlier_from_long_left_replace(opcodes, ot, rt)
+    opcodes = _prefer_later_stronger_equal_anchor(opcodes, ot, rt)
+    opcodes = _dedupe_reinserted_equal_prefix(opcodes, ot, rt)
+    opcodes = _absorb_weak_equal_islands_between_changes(opcodes, ot, rt)
+    opcodes = _rotate_shared_punctuation_around_deleted_clause(opcodes, ot, rt)
+    opcodes = _expand_replace_to_include_following_shared_ws_token(opcodes, ot, rt)
+    out: list[ET.Element] = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            if struct_ot is not None:
+                out.extend(_emit_structured_equal_runs(struct_ot, i1, i2))
+            else:
+                # Clone runs; span text matches "".join(t.surface for t in rt[j1:j2]) (equal opcode).
+                ts, te = bounds_from_token_indices(ot, i1, i2)
+                out.extend(_emit_cloned_runs_for_raw_range(aligned, ts, te))
+        elif tag == "delete":
+            chunk = equal_span_surface(ot, i1, i2)
+            if chunk:
+                out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
+        elif tag == "insert":
+            chunk = equal_span_surface(rt, j1, j2)
+            if chunk:
+                out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
+        elif tag == "replace":
+            out.extend(
+                _emit_preserving_replace_multitoken_bounded(
+                    aligned,
+                    ot,
+                    rt,
+                    i1,
+                    i2,
+                    j1,
+                    j2,
+                    struct_ot=struct_ot,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
+            )
+    return out
 
 
 def _token_level_text_differs(o: str, r: str) -> bool:
     if o == r:
         return False
-    ot, rt = _word_level_tokens(o), _word_level_tokens(r)
-    for tag, *_ in difflib.SequenceMatcher(None, ot, rt, autojunk=False).get_opcodes():
+    ot, rt = tokenize_for_lcs(o), tokenize_for_lcs(r)
+    sm = difflib.SequenceMatcher(None, norm_keys(ot), norm_keys(rt), autojunk=False)
+    for tag, *_ in sm.get_opcodes():
         if tag != "equal":
             return True
     return False
@@ -553,202 +820,1318 @@ def _w_ins_segment(text: str, ins_id: str, author: str, date_iso: str) -> ET.Ele
     return ins_el
 
 
-def _emit_single_token_replace_fragment(
-    before: str,
-    after: str,
+# Table ``major_sentence_mode`` full-line replace uses a looser bar so unrelated
+# sentences still collapse to one ``w:del`` + one ``w:ins`` (SCRUM-131).
+_TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX = 0.35
+
+
+def _word_token_similarity_ratio(a: str, b: str) -> float:
+    """
+    Similarity of non-whitespace :class:`~engine.diff_tokens.DiffToken` norm keys
+    via :class:`difflib.SequenceMatcher` (same tokenization as paragraph LCS).
+    """
+
+    ta = [t for t in tokenize_for_lcs(a) if not t.surface.isspace()]
+    tb = [t for t in tokenize_for_lcs(b) if not t.surface.isspace()]
+    if not ta and not tb:
+        return 1.0
+    if not ta or not tb:
+        return 0.0
+    return difflib.SequenceMatcher(None, norm_keys(ta), norm_keys(tb), autojunk=False).ratio()
+
+
+def _emit_preserving_replace_multitoken_bounded(
+    aligned: list[tuple[ET.Element, str]],
+    ot: list[DiffToken],
+    rt: list[DiffToken],
+    i1: int,
+    i2: int,
+    j1: int,
+    j2: int,
     *,
+    struct_ot: list[StructuredOrigToken] | None,
     id_counter: list[int],
     author: str,
     date_iso: str,
+    depth: int = 0,
 ) -> list[ET.Element]:
     """
-    Emit a fine-grained replacement for single-token spans.
+    One ``w:del`` + one ``w:ins`` for the outer replace span (no nested LCS).
 
-    Preserves shared prefix/suffix as plain runs so only true differences are
-    wrapped in w:del / w:ins (for example, ``1.0`` -> ``2.0`` keeps ``.0``).
+    Before/after text is :func:`~engine.diff_tokens.equal_span_surface` on the LCS
+    token spans (``ot[i1:i2]``, ``rt[j1:j2]``), not ``raw_full``/``rev_text`` slices.
+    *aligned* / *struct_ot* are unused but kept for a stable call signature with
+    :func:`_try_build_track_changes_preserving_orig_runs`.
     """
 
-    if before == after:
-        return [_w_run_single_t(before)] if before else []
-
-    if not before:
-        return [_w_ins_segment(after, _next_id(id_counter), author, date_iso)] if after else []
-    if not after:
-        return [_w_del_segment(before, _next_id(id_counter), author, date_iso)]
-
-    min_len = min(len(before), len(after))
-    prefix_len = 0
-    while prefix_len < min_len and before[prefix_len] == after[prefix_len]:
-        prefix_len += 1
-
-    max_suffix = min_len - prefix_len
-    suffix_len = 0
-    while suffix_len < max_suffix and before[-(suffix_len + 1)] == after[-(suffix_len + 1)]:
-        suffix_len += 1
-
-    prefix = before[:prefix_len]
-    before_mid_end = len(before) - suffix_len if suffix_len else len(before)
-    after_mid_end = len(after) - suffix_len if suffix_len else len(after)
-    before_mid = before[prefix_len:before_mid_end]
-    after_mid = after[prefix_len:after_mid_end]
-    suffix = before[-suffix_len:] if suffix_len else ""
-
+    _ = aligned, struct_ot, depth
+    bo = equal_span_surface(ot, i1, i2)
+    ar = equal_span_surface(rt, j1, j2)
     out: list[ET.Element] = []
-    if prefix:
-        out.append(_w_run_single_t(prefix))
-    if before_mid:
-        out.append(_w_del_segment(before_mid, _next_id(id_counter), author, date_iso))
-    if after_mid:
-        out.append(_w_ins_segment(after_mid, _next_id(id_counter), author, date_iso))
-    if suffix:
-        out.append(_w_run_single_t(suffix))
+    if bo:
+        out.append(_w_del_segment(bo, _next_id(id_counter), author, date_iso))
+    if ar:
+        out.append(_w_ins_segment(ar, _next_id(id_counter), author, date_iso))
     return out
 
 
-def _replace_span_is_multi_token(before: str, after: str) -> bool:
-    """True when the replaced text spans more than one word token or includes spaces."""
-    if not before and not after:
-        return False
-    for s in (before, after):
-        if re.search(r"\s", s):
-            return True
-        if len(re.findall(r"\S+", s)) > 1:
-            return True
+def _tc_concat_fragmentation_debug_enabled(orig_text: str, rev_text: str) -> bool:
+    """True when detailed concat-texts token/opcode tracing should print (stderr)."""
+
+    if os.environ.get("MDC_DEBUG_TC_CONCAT_FRAGMENTS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return True
+    return (
+        orig_text == "the name is kiran" and rev_text == "I am introduce as kiran"
+    )
+
+
+def _log_tc_concat_fragmentation_trace(
+    orig_text: str,
+    rev_text: str,
+    orig_tokens: list,
+    rev_tokens: list,
+    opcodes: list[tuple[str, int, int, int, int]],
+) -> None:
+    """Stderr-only: token lists, norm keys, per-opcode slices, and counts (grouping design aid).
+
+    *opcodes* must be the **post-collapse** opcode list (same as used for emit).
+    """
+
+    print(
+        "[MDC_DEBUG_TC_CONCAT_FRAG] emit_branch=concat_texts "
+        "(_track_change_elements_for_concat_texts; preserving_orig_runs bypasses this function)",
+        file=sys.stderr,
+    )
+    print(f"[MDC_DEBUG_TC_CONCAT_FRAG] orig_text={orig_text!r}", file=sys.stderr)
+    print(f"[MDC_DEBUG_TC_CONCAT_FRAG] rev_text={rev_text!r}", file=sys.stderr)
+    for i, t in enumerate(orig_tokens):
+        print(
+            f"[MDC_DEBUG_TC_CONCAT_FRAG] orig_tokens[{i}]={t.surface!r} [{t.start},{t.end})",
+            file=sys.stderr,
+        )
+    for j, t in enumerate(rev_tokens):
+        print(
+            f"[MDC_DEBUG_TC_CONCAT_FRAG] rev_tokens[{j}]={t.surface!r} [{t.start},{t.end})",
+            file=sys.stderr,
+        )
+    nk_o = norm_keys(orig_tokens)
+    nk_r = norm_keys(rev_tokens)
+    print(f"[MDC_DEBUG_TC_CONCAT_FRAG] norm_keys(orig_tokens)={nk_o!r}", file=sys.stderr)
+    print(f"[MDC_DEBUG_TC_CONCAT_FRAG] norm_keys(rev_tokens)={nk_r!r}", file=sys.stderr)
+    opcode_count = len(opcodes)
+    pattern_parts: list[str] = []
+    replace_orig_spans: list[int] = []
+    matched_tc = deleted_tc = inserted_tc = 0
+    for tag, i1, i2, j1, j2 in opcodes:
+        o_slice = orig_tokens[i1:i2]
+        r_slice = rev_tokens[j1:j2]
+        o_parts = [f"[{i1 + k}]={t.surface!r}" for k, t in enumerate(o_slice)]
+        r_parts = [f"[{j1 + k}]={t.surface!r}" for k, t in enumerate(r_slice)]
+        print(
+            f"[MDC_DEBUG_TC_CONCAT_FRAG] opcode tag={tag!r} i1={i1} i2={i2} j1={j1} j2={j2}",
+            file=sys.stderr,
+        )
+        print(
+            f"[MDC_DEBUG_TC_CONCAT_FRAG]   orig_token_slice: {' '.join(o_parts) if o_parts else '(empty)'}",
+            file=sys.stderr,
+        )
+        print(
+            f"[MDC_DEBUG_TC_CONCAT_FRAG]   rev_token_slice:  {' '.join(r_parts) if r_parts else '(empty)'}",
+            file=sys.stderr,
+        )
+        if tag == "equal":
+            pattern_parts.append("E")
+            matched_tc += i2 - i1
+        elif tag == "delete":
+            pattern_parts.append("D")
+            deleted_tc += i2 - i1
+        elif tag == "insert":
+            pattern_parts.append("I")
+            inserted_tc += j2 - j1
+        elif tag == "replace":
+            pattern_parts.append("R")
+            deleted_tc += i2 - i1
+            inserted_tc += j2 - j1
+            replace_orig_spans.append(i2 - i1)
+
+    total_orig_tokens = len(orig_tokens)
+    total_rev_tokens = len(rev_tokens)
+    denom = max(total_orig_tokens, total_rev_tokens)
+    match_ratio = (matched_tc / denom) if denom > 0 else 0.0
+    opcode_pattern = ",".join(pattern_parts)
+    avg_replace_span_size = (
+        sum(replace_orig_spans) / len(replace_orig_spans) if replace_orig_spans else 0.0
+    )
+
+    print(f"[MDC_DEBUG_TC_CONCAT_FRAG] opcode_count={opcode_count}", file=sys.stderr)
+    print(f"[MDC_DEBUG_TC_CONCAT_FRAG] opcode_pattern={opcode_pattern}", file=sys.stderr)
+    print(
+        f"[MDC_DEBUG_TC_CONCAT_FRAG] total_orig_tokens={total_orig_tokens} "
+        f"total_rev_tokens={total_rev_tokens} match_ratio={match_ratio:.6f}",
+        file=sys.stderr,
+    )
+    print(
+        f"[MDC_DEBUG_TC_CONCAT_FRAG] avg_replace_span_size={avg_replace_span_size:.6f} "
+        f"(orig-side token count per replace opcode; n_replace={len(replace_orig_spans)})",
+        file=sys.stderr,
+    )
+    print(
+        f"[MDC_DEBUG_TC_CONCAT_FRAG] metrics: matched_token_count={matched_tc} "
+        f"deleted_token_count={deleted_tc} inserted_token_count={inserted_tc}",
+        file=sys.stderr,
+    )
+    print(
+        f"[MDC_DEBUG_TC_CONCAT_FRAG] total_tokens orig={total_orig_tokens} rev={total_rev_tokens}",
+        file=sys.stderr,
+    )
+
+
+def _tc_token_surface_trivial_for_merge(surface: str) -> bool:
+    """True if *surface* has no Unicode letters and no digits (separator-only).
+
+    Whitespace, punctuation, and symbols such as ``-``, ``:``, ``_`` are trivial.
+    Uses :meth:`str.isalpha` / :meth:`str.isdigit` so ``_`` is not treated as
+    blocking (unlike :meth:`str.isalnum`, which is true for underscore).
+    """
+
+    for c in surface:
+        if c.isalpha() or c.isdigit():
+            return False
+    return True
+
+
+def _tc_equal_opcode_tokens_all_trivial_for_merge(
+    orig_tokens: list,
+    ei1: int,
+    ei2: int,
+    rev_tokens: list,
+    ej1: int,
+    ej2: int,
+) -> bool:
+    """True if every token on both sides has no letters or digits (separator-only)."""
+
+    if ei1 >= ei2 and ej1 >= ej2:
+        return True
+    for k in range(ei1, ei2):
+        if not _tc_token_surface_trivial_for_merge(orig_tokens[k].surface):
+            return False
+    for k in range(ej1, ej2):
+        if not _tc_token_surface_trivial_for_merge(rev_tokens[k].surface):
+            return False
+    return True
+
+
+def _collapse_adjacent_replace_opcodes(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Greedy merge of ``replace`` + (``equal`` + ``replace``)* chains when each ``equal``
+    span is only trivial separators (whitespace / punctuation), so
+    ``R,E,R,E,R,…`` becomes a single ``replace`` for emission.
+    """
+
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    n = len(opcodes)
+    while i < n:
+        tag, i1, i2, j1, j2 = opcodes[i]
+        if tag != "replace":
+            out.append((tag, i1, i2, j1, j2))
+            i += 1
+            continue
+        start_i1, start_j1 = i1, j1
+        end_i2, end_j2 = i2, j2
+        j = i + 1
+        chain_steps = 0
+        while j + 1 < n:
+            et, ei1, ei2, ej1, ej2 = opcodes[j]
+            rt, ri1, ri2, rj1, rj2 = opcodes[j + 1]
+            if et != "equal" or rt != "replace":
+                break
+            if not _tc_equal_opcode_tokens_all_trivial_for_merge(
+                orig_tokens, ei1, ei2, rev_tokens, ej1, ej2
+            ):
+                break
+            end_i2 = ri2
+            end_j2 = rj2
+            chain_steps += 1
+            j += 2
+        if chain_steps > 0:
+            print(
+                f"[MDC_DEBUG_TC_COLLAPSE_CHAIN] merged_chain_span "
+                f"i1={start_i1} i2={end_i2} j1={start_j1} j2={end_j2} chain_steps={chain_steps}",
+                file=sys.stderr,
+            )
+        out.append(("replace", start_i1, end_i2, start_j1, end_j2))
+        i = j
+    return out
+
+
+def _merge_adjacent_equal_opcodes(
+    opcodes: list[tuple[str, int, int, int, int]],
+) -> list[tuple[str, int, int, int, int]]:
+    """Merge consecutive ``equal`` opcodes that share boundaries (keeps list compact)."""
+
+    if not opcodes:
+        return opcodes
+    out: list[tuple[str, int, int, int, int]] = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal" and out and out[-1][0] == "equal":
+            pt, pi1, pi2, pj1, pj2 = out[-1]
+            if pi2 == i1 and pj2 == j1:
+                out[-1] = ("equal", pi1, i2, pj1, j2)
+                continue
+        out.append((tag, i1, i2, j1, j2))
+    return out
+
+
+def _refine_replace_boundaries(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Split ``replace`` opcodes so leading/trailing token pairs with identical surfaces
+    become ``equal`` opcodes (Word-like boundaries; avoids gluing unrelated tokens).
+    """
+
+    new_opcodes: list[tuple[str, int, int, int, int]] = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag != "replace":
+            new_opcodes.append((tag, i1, i2, j1, j2))
+            continue
+        end_i2, end_j2 = i2, j2
+        a, b = i1, j1
+        while a < end_i2 and b < end_j2 and orig_tokens[a].surface == rev_tokens[b].surface:
+            new_opcodes.append(("equal", a, a + 1, b, b + 1))
+            a += 1
+            b += 1
+        c, d = end_i2, end_j2
+        while c > a and d > b and orig_tokens[c - 1].surface == rev_tokens[d - 1].surface:
+            c -= 1
+            d -= 1
+        if a < c or b < d:
+            new_opcodes.append(("replace", a, c, b, d))
+        while c < end_i2 and d < end_j2:
+            new_opcodes.append(("equal", c, c + 1, d, d + 1))
+            c += 1
+            d += 1
+    return _merge_adjacent_equal_opcodes(new_opcodes)
+
+
+# Minimum matching token suffix length to coalesce into one ``equal`` tail (stable shared text).
+# ``3`` keeps tails like ``published`` + space + ``study`` as one ``equal`` while allowing a
+# broader ``replace`` prefix than the raw matcher (e.g. include ``recently`` on both sides).
+_TC_ALIGN_MIN_COMMON_SUFFIX_TOKENS = 3
+
+# Minimum equal-token count at end of opcode list to treat as stable tail for unstable merge.
+_TC_ALIGN_MIN_STABLE_TAIL_TOKENS = 4
+
+# Mid-paragraph change cluster merge: keep substantial equal anchors (for example,
+# ``women in the US`` or a full preserved sentence) plain, but collapse the
+# rewrite region between them when changes dominate and the inner equal islands
+# are too small to justify alternating ``w:del`` / ``w:ins`` churn.
+_TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS = 4
+_TC_CLUSTER_ANCHOR_EQUAL_TOKENS = 6
+_TC_CLUSTER_STRONG_INNER_EQUAL_TOKENS = 5
+_TC_CLUSTER_MIN_CHANGE_OPCODES = 3
+_MERGED_PARA_SPLIT_PREFIX_WORDS = 8
+
+
+def _coalesce_opcodes_at_longest_common_token_suffix(
+    orig_tokens: list,
+    rev_tokens: list,
+    opcodes: list[tuple[str, int, int, int, int]],
+) -> list[tuple[str, int, int, int, int]] | None:
+    """
+    When both sides share an identical token suffix of at least
+    ``_TC_ALIGN_MIN_COMMON_SUFFIX_TOKENS`` tokens (fixed tail, not necessarily the
+    longest possible LCS suffix), collapse the diff to
+    ``replace(prefix_orig, prefix_rev)`` + ``equal(suffix)``.
+
+    This aligns replace boundaries with a stable shared tail (e.g. ``published study``)
+    without changing emission helpers. Skips when the prefix would be a trivial
+    single-token alphabetic/digit substitution (granular typo / number).
+
+    For a two-opcode ``replace`` + ``equal`` diff, this can move tokens out of the
+    equal span into the replace when the matcher over-anchors on a shared word
+    (e.g. ``recently``) before the tail. Leading ``equal`` opcodes are never merged.
+    """
+
+    m = _TC_ALIGN_MIN_COMMON_SUFFIX_TOKENS
+    os, rs = len(orig_tokens), len(rev_tokens)
+    # Two-opcode ``replace`` + ``equal``: realign when the matcher anchors too much in the
+    # equal span (e.g. shared ``recently`` before a stable ``published study`` tail).
+    # Skip two-opcode forms that are not ``replace``+``equal`` (and skip when the diff
+    # begins with ``equal``, which would pull shared prefix text into ``replace``).
+    if len(opcodes) < 2:
+        return None
+    if len(opcodes) == 2:
+        if opcodes[0][0] != "replace" or opcodes[1][0] != "equal":
+            return None
+    elif len(opcodes) < 3:
+        return None
+    else:
+        # Do not pull leading unchanged text into ``replace`` (shared prefix is ``equal``).
+        if opcodes[0][0] == "equal":
+            return None
+    if os < m or rs < m:
+        return None
+    for k in range(m):
+        if orig_tokens[os - 1 - k].surface != rev_tokens[rs - 1 - k].surface:
+            return None
+    si, sj = os - m, rs - m
+    if si <= 0 or sj <= 0:
+        return None
+    if si == 1 and sj == 1:
+        o0 = orig_tokens[0].surface.strip()
+        r0 = rev_tokens[0].surface.strip()
+        if o0 and r0 and (
+            (o0.isalpha() and r0.isalpha()) or (o0.isdigit() and r0.isdigit())
+        ):
+            return None
+    out = [
+        ("replace", 0, si, 0, sj),
+        ("equal", si, os, sj, rs),
+    ]
+    if out == opcodes:
+        return None
+    return out
+
+
+def _tc_opcode_prefix_is_contiguous(
+    prefix: list[tuple[str, int, int, int, int]],
+) -> bool:
+    if len(prefix) <= 1:
+        return True
+    for i in range(len(prefix) - 1):
+        a, b = prefix[i], prefix[i + 1]
+        if a[2] != b[1] or a[4] != b[3]:
+            return False
+    return True
+
+
+def _tc_unstable_prefix_pattern(prefix: list[tuple[str, int, int, int, int]]) -> bool:
+    tags = [p[0] for p in prefix]
+    if len(prefix) >= 3:
+        return True
+    if "insert" in tags and "delete" in tags:
+        return True
+    if len(tags) >= 2 and tags[0] == "delete" and tags[1] == "insert":
+        return True
     return False
 
 
-def _emit_word_only_track_change_fragment(
-    before: str,
-    after: str,
-    *,
-    id_counter: list[int],
-    author: str,
-    date_iso: str,
-) -> list[ET.Element]:
+def _merge_unstable_opcode_regions(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
     """
-    Diff on ``\\S+`` tokens only (no whitespace runs).
-
-    Used when a word-token replace span still has multiple words on a side but
-    no reliable character alignment (unrelated phrases). ``equal`` runs join
-    words with a single ASCII space (acceptable for clinical prose).
+    Merge a fragmented prefix (many small delete/insert/replace/equal ops) into one
+    ``replace`` when a stable equal tail of at least ``_TC_ALIGN_MIN_STABLE_TAIL_TOKENS``
+    tokens remains at the end.
     """
 
-    out: list[ET.Element] = []
-    lead_b = re.match(r"^\s+", before)
-    if lead_b:
-        out.extend(_w_runs_for_plain_text(lead_b.group(0)))
-    trail_b = re.search(r"\s+$", before)
-    trail_b_s = trail_b.group(0) if trail_b else ""
+    if len(opcodes) <= 1:
+        return opcodes
 
-    wb = re.findall(r"\S+", before)
-    wa = re.findall(r"\S+", after)
-    if not wb and not wa:
-        if trail_b_s:
-            out.extend(_w_runs_for_plain_text(trail_b_s))
-        return out
+    acc = 0
+    stable_start: int | None = None
+    for idx in range(len(opcodes) - 1, -1, -1):
+        tag, i1, i2, j1, j2 = opcodes[idx]
+        if tag != "equal":
+            break
+        acc += i2 - i1
+        stable_start = idx
+        if acc >= _TC_ALIGN_MIN_STABLE_TAIL_TOKENS:
+            break
+    if stable_start is None or acc < _TC_ALIGN_MIN_STABLE_TAIL_TOKENS:
+        return opcodes
 
-    sm = difflib.SequenceMatcher(None, wb, wa, autojunk=False)
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
-            if i1 < i2:
-                out.extend(_w_runs_for_plain_text(" ".join(wb[i1:i2])))
-        elif tag == "delete":
-            for w in wb[i1:i2]:
-                out.append(_w_del_segment(w, _next_id(id_counter), author, date_iso))
-        elif tag == "insert":
-            for w in wa[j1:j2]:
-                out.append(_w_ins_segment(w, _next_id(id_counter), author, date_iso))
-        elif tag == "replace":
-            slice_b, slice_a = wb[i1:i2], wa[j1:j2]
-            nb, na = len(slice_b), len(slice_a)
-            for k in range(min(nb, na)):
-                out.append(
-                    _w_del_segment(slice_b[k], _next_id(id_counter), author, date_iso)
-                )
-                out.append(
-                    _w_ins_segment(slice_a[k], _next_id(id_counter), author, date_iso)
-                )
-            for k in range(min(nb, na), nb):
-                out.append(
-                    _w_del_segment(slice_b[k], _next_id(id_counter), author, date_iso)
-                )
-            for k in range(min(nb, na), na):
-                out.append(
-                    _w_ins_segment(slice_a[k], _next_id(id_counter), author, date_iso)
-                )
-    if trail_b_s:
-        out.extend(_w_runs_for_plain_text(trail_b_s))
-    return out
+    prefix = opcodes[:stable_start]
+    if not prefix:
+        return opcodes
+
+    meaningful_equal_lengths = [
+        (i2 - i1)
+        for tag, i1, i2, _j1, _j2 in prefix
+        if tag == "equal" and (i2 - i1) >= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
+    ]
+    if len(meaningful_equal_lengths) >= 2:
+        return opcodes
+
+    if len(prefix) == 1:
+        t, i1, i2, j1, j2 = prefix[0]
+        if t == "replace" and (i2 - i1) == 1 and (j2 - j1) == 1:
+            return opcodes
+        return opcodes
+    if len(prefix) == 2 and not _tc_unstable_prefix_pattern(prefix):
+        return opcodes
+
+    if not _tc_opcode_prefix_is_contiguous(prefix):
+        return opcodes
+
+    i1_lo = prefix[0][1]
+    i2_hi = prefix[-1][2]
+    j1_lo = prefix[0][3]
+    j2_hi = prefix[-1][4]
+    merged = [("replace", i1_lo, i2_hi, j1_lo, j2_hi)] + opcodes[stable_start:]
+    return _merge_adjacent_equal_opcodes(merged)
 
 
-def _emit_word_token_track_change_fragment(
-    before: str,
-    after: str,
-    *,
-    id_counter: list[int],
-    author: str,
-    date_iso: str,
-) -> list[ET.Element]:
+def _merge_change_cluster_between_meaningful_equals(
+    opcodes: list[tuple[str, int, int, int, int]],
+) -> list[tuple[str, int, int, int, int]]:
     """
-    Word-token diff on a substring (typically the ``before``/``after`` of a
-    multi-token outer ``replace``).
+    Collapse a fragmented change cluster between substantial equal anchors.
 
-    Character-level diff on long unrelated phrases often yields a single huge
-    ``replace`` opcode → one ``w:del`` for the whole clause. Re-running LCS on
-    tokens pulls out shared pieces (e.g. `` at week ``) and splits outgoing words
-    into separate revision markers.
+    This targets paragraph rewrites where the matcher finds a few strong anchors
+    but still emits ``replace/equal(1-2 tokens)/replace/...`` through the middle.
+    Long equal spans remain plain text; only the noisy cluster between them is
+    collapsed to a single change opcode.
     """
 
-    out: list[ET.Element] = []
-    if not before and not after:
-        return out
-    if not before:
-        if after:
-            out.append(_w_ins_segment(after, _next_id(id_counter), author, date_iso))
-        return out
-    if not after:
-        out.append(_w_del_segment(before, _next_id(id_counter), author, date_iso))
-        return out
+    if len(opcodes) < 5:
+        return opcodes
 
-    ot, rt = _word_level_tokens(before), _word_level_tokens(after)
-    sm = difflib.SequenceMatcher(None, ot, rt, autojunk=False)
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
-            chunk = "".join(ot[i1:i2])
-            if chunk:
-                out.extend(_w_runs_for_plain_text(chunk))
-        elif tag == "delete":
-            chunk = "".join(ot[i1:i2])
-            if chunk:
-                out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
-        elif tag == "insert":
-            chunk = "".join(rt[j1:j2])
-            if chunk:
-                out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
-        elif tag == "replace":
-            b = "".join(ot[i1:i2])
-            a = "".join(rt[j1:j2])
-            if not _replace_span_is_multi_token(b, a):
-                out.extend(
-                    _emit_single_token_replace_fragment(
-                        b,
-                        a,
-                        id_counter=id_counter,
-                        author=author,
-                        date_iso=date_iso,
+    def _meaningful_equal(op: tuple[str, int, int, int, int]) -> bool:
+        tag, i1, i2, _j1, _j2 = op
+        return tag == "equal" and (i2 - i1) >= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
+
+    def _anchor_equal(op: tuple[str, int, int, int, int]) -> bool:
+        tag, i1, i2, _j1, _j2 = op
+        return tag == "equal" and (i2 - i1) >= _TC_CLUSTER_ANCHOR_EQUAL_TOKENS
+
+    def _emit_change_opcode(
+        region: list[tuple[str, int, int, int, int]],
+    ) -> tuple[str, int, int, int, int]:
+        i1_lo = region[0][1]
+        i2_hi = region[-1][2]
+        j1_lo = region[0][3]
+        j2_hi = region[-1][4]
+        if i1_lo == i2_hi:
+            return ("insert", i1_lo, i2_hi, j1_lo, j2_hi)
+        if j1_lo == j2_hi:
+            return ("delete", i1_lo, i2_hi, j1_lo, j2_hi)
+        return ("replace", i1_lo, i2_hi, j1_lo, j2_hi)
+
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    n = len(opcodes)
+    while i < n:
+        cur = opcodes[i]
+        if not _anchor_equal(cur):
+            out.append(cur)
+            i += 1
+            continue
+
+        region: list[tuple[str, int, int, int, int]] = []
+        j = i + 1
+        while j < n and not _anchor_equal(opcodes[j]):
+            region.append(opcodes[j])
+            j += 1
+        out.append(cur)
+        if not region or j >= n:
+            out.extend(region)
+            i = j
+            continue
+
+        change_count = sum(1 for tag, *_ in region if tag != "equal")
+        equal_token_total = sum((i2 - i1) for tag, i1, i2, _j1, _j2 in region if tag == "equal")
+        changed_token_total = sum(
+            max(i2 - i1, j2 - j1)
+            for tag, i1, i2, j1, j2 in region
+            if tag != "equal"
+        )
+        strongest_inner_equal = max(
+            ((i2 - i1) for tag, i1, i2, _j1, _j2 in region if tag == "equal"),
+            default=0,
+        )
+        if (
+            change_count >= _TC_CLUSTER_MIN_CHANGE_OPCODES
+            and strongest_inner_equal < _TC_CLUSTER_STRONG_INNER_EQUAL_TOKENS
+            and changed_token_total > max(12, equal_token_total * 2)
+            and _tc_opcode_prefix_is_contiguous(region)
+        ):
+            out.append(_emit_change_opcode(region))
+            out.append(opcodes[j])
+            i = j + 1
+            continue
+
+        out.extend(region)
+        i = j
+
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _split_replace_opcodes_on_internal_meaningful_equals(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Expand one coarse ``replace`` when it contains a real reused phrase internally.
+
+    This targets asymmetric replace spans such as ``old citation + phrase`` vs
+    ``short reused phrase`` where Word still preserves an internal anchor like
+    ``In addition`` as plain text.
+    """
+
+    def _find_token_subsequence_start(
+        haystack: list[DiffToken], needle: list[DiffToken], start: int
+    ) -> int | None:
+        if not needle:
+            return start
+        n = len(needle)
+        for idx in range(start, len(haystack) - n + 1):
+            if all(haystack[idx + k].surface == needle[k].surface for k in range(n)):
+                return idx
+        return None
+
+    def _candidate_anchor_ranges_for_equal_span(
+        sub_o: list[DiffToken], si1: int, si2: int
+    ) -> list[tuple[int, int]]:
+        """Full equal span plus trimmed variants that drop weak leading/trailing text."""
+
+        ranges: list[tuple[int, int]] = []
+
+        def _add(a: int, b: int, *, allow_weak: bool = False) -> None:
+            if a >= b:
+                return
+            text = equal_span_surface(sub_o, a, b)
+            if not re.search(r"[A-Za-z0-9]", text):
+                return
+            if not allow_weak and _equal_text_is_weak_anchor(text):
+                return
+            rng = (a, b)
+            if rng not in ranges:
+                ranges.append(rng)
+
+        _add(si1, si2)
+        wordish = [
+            idx
+            for idx in range(si1, si2)
+            if sub_o[idx].surface.strip() and re.search(r"\w", sub_o[idx].surface)
+        ]
+        if not wordish:
+            return ranges
+        for idx in wordish[1:]:
+            prefix = equal_span_surface(sub_o, si1, idx)
+            if _equal_text_is_weak_anchor(prefix):
+                _add(si1, idx, allow_weak=True)
+                _add(idx, si2)
+        for idx in reversed(wordish[:-1]):
+            suffix = equal_span_surface(sub_o, idx + 1, si2)
+            if _equal_text_is_weak_anchor(suffix):
+                _add(si1, idx + 1)
+        # When an equal span starts with a weak bridge and ends with several
+        # content words, also expose the interior content words as anchor
+        # candidates. This helps split spans like ``and Hispanic women`` or
+        # ``of cervical`` without making arbitrary short stopwords anchors.
+        if len(wordish) >= 2:
+            for k in range(1, len(wordish)):
+                head = equal_span_surface(sub_o, si1, wordish[k])
+                if not _equal_text_is_weak_anchor(head):
+                    break
+                for m in range(k, len(wordish)):
+                    end = wordish[m] + 1
+                    if m + 1 < len(wordish):
+                        end = wordish[m + 1]
+                    _add(wordish[k], end)
+        return ranges
+
+    def _rebuild_with_left_biased_internal_anchors(
+        sub_o: list[DiffToken],
+        sub_r: list[DiffToken],
+        sub_ops: list[tuple[str, int, int, int, int]],
+    ) -> list[tuple[str, int, int, int, int]] | None:
+        candidates: list[list[tuple[int, int]]] = []
+        for stag, si1, si2, _sj1, _sj2 in sub_ops:
+            if stag != "equal" or si1 <= 0 or si2 >= len(sub_o):
+                continue
+            anchor_ranges = _candidate_anchor_ranges_for_equal_span(sub_o, si1, si2)
+            if anchor_ranges:
+                candidates.append(anchor_ranges)
+        if not candidates:
+            return None
+        rebuilt: list[tuple[str, int, int, int, int]] = []
+        cur_i = 0
+        cur_j = 0
+        used = 0
+        for anchor_ranges in candidates:
+            chosen: tuple[int, int, int] | None = None
+            for si1, si2 in anchor_ranges:
+                if si1 < cur_i:
+                    continue
+                needle = sub_o[si1:si2]
+                new_j = _find_token_subsequence_start(sub_r, needle, cur_j)
+                if new_j is None:
+                    continue
+                cand = (new_j, si1, si2)
+                if chosen is None or cand[0] < chosen[0] or (
+                    cand[0] == chosen[0] and (cand[2] - cand[1]) > (chosen[2] - chosen[1])
+                ):
+                    chosen = cand
+            if chosen is None:
+                continue
+            new_j, si1, si2 = chosen
+            if si1 < cur_i:
+                continue
+            if si1 > cur_i or new_j > cur_j:
+                tag = "replace"
+                if si1 == cur_i:
+                    tag = "insert"
+                elif new_j == cur_j:
+                    tag = "delete"
+                rebuilt.append((tag, cur_i, si1, cur_j, new_j))
+            rebuilt.append(("equal", si1, si2, new_j, new_j + len(needle)))
+            cur_i = si2
+            cur_j = new_j + len(needle)
+            used += 1
+        if used == 0:
+            return None
+        if cur_i < len(sub_o) or cur_j < len(sub_r):
+            tag = "replace"
+            if cur_i == len(sub_o):
+                tag = "insert"
+            elif cur_j == len(sub_r):
+                tag = "delete"
+            rebuilt.append((tag, cur_i, len(sub_o), cur_j, len(sub_r)))
+        return _merge_adjacent_equal_opcodes(rebuilt)
+
+    out: list[tuple[str, int, int, int, int]] = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag != "replace":
+            out.append((tag, i1, i2, j1, j2))
+            continue
+        o_len = i2 - i1
+        r_len = j2 - j1
+        if max(o_len, r_len) < 8:
+            out.append((tag, i1, i2, j1, j2))
+            continue
+        sub_o = orig_tokens[i1:i2]
+        sub_r = rev_tokens[j1:j2]
+        sm = difflib.SequenceMatcher(None, norm_keys(sub_o), norm_keys(sub_r), autojunk=False)
+        sub_ops = sm.get_opcodes()
+        sub_ratio = sm.ratio()
+        internal_eq = [
+            (si1, si2, sj1, sj2)
+            for stag, si1, si2, sj1, sj2 in sub_ops
+            if stag == "equal" and 0 < si1 and si2 < len(sub_o)
+        ]
+        has_meaningful_internal_equal = any(
+            (si2 - si1) >= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
+            for si1, si2, _sj1, _sj2 in internal_eq
+        )
+        nonweak_internal_equals = [
+            (si1, si2, sj1, sj2)
+            for si1, si2, sj1, sj2 in internal_eq
+            if _candidate_anchor_ranges_for_equal_span(sub_o, si1, si2)
+        ]
+        allow_left_biased_anchor_split = (
+            len(nonweak_internal_equals) >= 1
+            and sum((si2 - si1) for si1, si2, _sj1, _sj2 in nonweak_internal_equals) >= 3
+            and sub_ratio <= 0.35
+        )
+        if not has_meaningful_internal_equal and not allow_left_biased_anchor_split:
+            out.append((tag, i1, i2, j1, j2))
+            continue
+        rebuilt_left = None
+        if allow_left_biased_anchor_split:
+            rebuilt_left = _rebuild_with_left_biased_internal_anchors(sub_o, sub_r, sub_ops)
+        if rebuilt_left is not None:
+            for stag, si1, si2, sj1, sj2 in rebuilt_left:
+                out.append((stag, i1 + si1, i1 + si2, j1 + sj1, j1 + sj2))
+            continue
+        for stag, si1, si2, sj1, sj2 in sub_ops:
+            out.append((stag, i1 + si1, i1 + si2, j1 + sj1, j1 + sj2))
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _left_bias_internal_equal_between_changes(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Re-anchor a repeated internal ``equal`` to an earlier revised occurrence.
+
+    This repairs ``replace/equal/replace`` triplets where the equal span was
+    matched against a later repeated phrase in the revised paragraph, causing the
+    following replacement to pull in the wrong clause.
+    """
+
+    def _find_token_subsequence_start(
+        haystack: list[DiffToken],
+        needle: list[DiffToken],
+        start: int,
+        end: int,
+    ) -> int | None:
+        if not needle:
+            return start
+        n = len(needle)
+        hi = min(end, len(haystack) - n)
+        for idx in range(start, hi + 1):
+            if all(haystack[idx + k].surface == needle[k].surface for k in range(n)):
+                return idx
+        return None
+
+    def _candidate_ranges(i1: int, i2: int) -> list[tuple[int, int]]:
+        ranges: list[tuple[int, int]] = []
+
+        def _add(a: int, b: int) -> None:
+            if a >= b:
+                return
+            text = equal_span_surface(orig_tokens, a, b)
+            if not re.search(r"[A-Za-z0-9]", text):
+                return
+            if _equal_text_is_weak_anchor(text):
+                return
+            rng = (a, b)
+            if rng not in ranges:
+                ranges.append(rng)
+
+        _add(i1, i2)
+        a, b = i1, i2
+        while a < b and orig_tokens[a].surface.isspace():
+            a += 1
+            _add(a, b)
+        while a < b and orig_tokens[b - 1].surface.isspace():
+            b -= 1
+            _add(a, b)
+        wordish = [
+            idx
+            for idx in range(i1, i2)
+            if orig_tokens[idx].surface.strip() and re.search(r"\w", orig_tokens[idx].surface)
+        ]
+        if not wordish:
+            return ranges
+        for idx in wordish[1:]:
+            if _equal_text_is_weak_anchor(equal_span_surface(orig_tokens, i1, idx)):
+                _add(idx, i2)
+        for idx in reversed(wordish[:-1]):
+            if _equal_text_is_weak_anchor(equal_span_surface(orig_tokens, idx + 1, i2)):
+                _add(i1, idx + 1)
+        return ranges
+
+    def _tag_for_bounds(
+        i1: int, i2: int, j1: int, j2: int
+    ) -> tuple[str, int, int, int, int] | None:
+        if i1 == i2 and j1 == j2:
+            return None
+        if i1 == i2:
+            return ("insert", i1, i2, j1, j2)
+        if j1 == j2:
+            return ("delete", i1, i2, j1, j2)
+        return ("replace", i1, i2, j1, j2)
+
+    if len(opcodes) < 3:
+        return opcodes
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    while i < len(opcodes):
+        if i + 2 < len(opcodes):
+            left = opcodes[i]
+            mid = opcodes[i + 1]
+            right = opcodes[i + 2]
+            if (
+                left[0] != "equal"
+                and mid[0] == "equal"
+                and right[0] != "equal"
+                and _tc_opcode_prefix_is_contiguous([left, mid, right])
+            ):
+                chosen: tuple[int, int, int] | None = None
+                for ai1, ai2 in _candidate_ranges(mid[1], mid[2]):
+                    new_j = _find_token_subsequence_start(
+                        rev_tokens,
+                        orig_tokens[ai1:ai2],
+                        left[3],
+                        mid[3] - 1,
                     )
-                )
-            else:
-                out.extend(
-                    _emit_word_only_track_change_fragment(
-                        b,
-                        a,
-                        id_counter=id_counter,
-                        author=author,
-                        date_iso=date_iso,
+                    if new_j is None or new_j >= mid[3]:
+                        continue
+                    cand = (new_j, ai1, ai2)
+                    if chosen is None or cand[0] < chosen[0] or (
+                        cand[0] == chosen[0] and (cand[2] - cand[1]) > (chosen[2] - chosen[1])
+                    ):
+                        chosen = cand
+                if chosen is not None:
+                    new_j, ai1, ai2 = chosen
+                    left_new = _tag_for_bounds(left[1], ai1, left[3], new_j)
+                    right_new = _tag_for_bounds(ai2, right[2], new_j + (ai2 - ai1), right[4])
+                    if left_new is not None:
+                        out.append(left_new)
+                    out.append(("equal", ai1, ai2, new_j, new_j + (ai2 - ai1)))
+                    if right_new is not None:
+                        out.append(right_new)
+                    i += 3
+                    continue
+        out.append(opcodes[i])
+        i += 1
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _dedupe_reinserted_equal_prefix(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Remove a duplicate revised prefix that repeats the preceding plain-text equal.
+
+    This repairs patterns like ``equal("In addition")`` followed by a change whose
+    revised side also starts with ``In addition``. After stripping the duplicate
+    prefix, downstream punctuation rotation can keep the anchor plain instead of
+    surfacing a spurious insert.
+    """
+
+    def _candidate_ranges(i1: int, i2: int) -> list[tuple[int, int]]:
+        ranges: list[tuple[int, int]] = []
+
+        def _add(a: int, b: int) -> None:
+            if a >= b:
+                return
+            text = equal_span_surface(orig_tokens, a, b)
+            if not text.strip() or _equal_text_is_weak_anchor(text):
+                return
+            rng = (a, b)
+            if rng not in ranges:
+                ranges.append(rng)
+
+        _add(i1, i2)
+        while i1 < i2 and orig_tokens[i1].surface.isspace():
+            i1 += 1
+            _add(i1, i2)
+        while i1 < i2 and orig_tokens[i2 - 1].surface.isspace():
+            i2 -= 1
+            _add(i1, i2)
+        return ranges
+
+    if len(opcodes) < 2:
+        return opcodes
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    while i < len(opcodes):
+        cur = opcodes[i]
+        if (
+            i + 1 < len(opcodes)
+            and cur[0] == "equal"
+            and opcodes[i + 1][0] != "equal"
+        ):
+            nxt = opcodes[i + 1]
+            matched = None
+            for ai1, ai2 in _candidate_ranges(cur[1], cur[2]):
+                span_len = ai2 - ai1
+                if equal_span_surface(orig_tokens, ai1, ai2) == equal_span_surface(
+                    rev_tokens, nxt[3], min(nxt[4], nxt[3] + span_len)
+                ):
+                    matched = (ai1, ai2)
+                    break
+            if matched is not None:
+                ai1, ai2 = matched
+                new_j1 = nxt[3] + (ai2 - ai1)
+                tag = nxt[0]
+                if nxt[1] == nxt[2] and new_j1 == nxt[4]:
+                    out.append(cur)
+                    i += 2
+                    continue
+                if nxt[1] == nxt[2]:
+                    tag = "insert"
+                elif new_j1 == nxt[4]:
+                    tag = "delete"
+                else:
+                    tag = "replace"
+                out.append(cur)
+                out.append((tag, nxt[1], nxt[2], new_j1, nxt[4]))
+                i += 2
+                continue
+        out.append(cur)
+        i += 1
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _pull_meaningful_equal_earlier_from_long_left_replace(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Shift an ``equal`` earlier when a tiny left replace already contains it.
+
+    This targets patterns like ``SCC`` -> long inserted text followed by
+    ``compared with`` where the same meaningful phrase appears earlier inside the
+    long revised text and should bound the next replacement instead.
+    """
+
+    def _find_token_subsequence_start(
+        haystack: list[DiffToken],
+        needle: list[DiffToken],
+        start: int,
+        end: int,
+    ) -> int | None:
+        if not needle:
+            return start
+        n = len(needle)
+        hi = min(end, len(haystack) - n)
+        for idx in range(start, hi + 1):
+            if all(haystack[idx + k].surface == needle[k].surface for k in range(n)):
+                return idx
+        return None
+
+    if len(opcodes) < 3:
+        return opcodes
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    while i < len(opcodes):
+        if i + 2 < len(opcodes):
+            left = opcodes[i]
+            mid = opcodes[i + 1]
+            right = opcodes[i + 2]
+            if (
+                left[0] == "replace"
+                and mid[0] == "equal"
+                and right[0] == "replace"
+                and _tc_opcode_prefix_is_contiguous([left, mid, right])
+                and (left[2] - left[1]) <= 2
+                and (left[4] - left[3]) >= 20
+            ):
+                eq_text = equal_span_surface(orig_tokens, mid[1], mid[2])
+                if eq_text.strip() and not _equal_text_is_weak_anchor(eq_text):
+                    needle = orig_tokens[mid[1] : mid[2]]
+                    earlier = _find_token_subsequence_start(
+                        rev_tokens, needle, left[3], mid[3] - 1
                     )
+                    if earlier is not None and earlier < mid[3]:
+                        out.append(("replace", left[1], left[2], left[3], earlier))
+                        out.append(
+                            (
+                                "equal",
+                                mid[1],
+                                mid[2],
+                                earlier,
+                                earlier + (mid[2] - mid[1]),
+                            )
+                        )
+                        out.append(
+                            (
+                                "replace",
+                                right[1],
+                                right[2],
+                                earlier + (mid[2] - mid[1]),
+                                right[4],
+                            )
+                        )
+                        i += 3
+                        continue
+        out.append(opcodes[i])
+        i += 1
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _prefer_later_stronger_equal_anchor(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Prefer a later stronger equal over an earlier single-word anchor.
+
+    This helps regions like ``White`` vs ``and Hispanic women`` where the later
+    phrase is a better stable anchor and the earlier single word should merge
+    into the surrounding change.
+    """
+
+    def _trim_weak_prefix(i1: int, i2: int) -> tuple[int, int]:
+        words = [
+            idx
+            for idx in range(i1, i2)
+            if orig_tokens[idx].surface.strip() and re.search(r"\w", orig_tokens[idx].surface)
+        ]
+        for idx in words[1:]:
+            if _equal_text_is_weak_anchor(equal_span_surface(orig_tokens, i1, idx)):
+                return idx, i2
+        return i1, i2
+
+    if len(opcodes) < 4:
+        return opcodes
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    while i < len(opcodes):
+        if i + 3 < len(opcodes):
+            left, eq1, mid, eq2 = opcodes[i : i + 4]
+            if (
+                left[0] != "equal"
+                and eq1[0] == "equal"
+                and mid[0] != "equal"
+                and eq2[0] == "equal"
+                and _tc_opcode_prefix_is_contiguous([left, eq1, mid, eq2])
+            ):
+                eq1_text = equal_span_surface(orig_tokens, eq1[1], eq1[2]).strip()
+                t_i1, t_i2 = _trim_weak_prefix(eq2[1], eq2[2])
+                eq2_trimmed = equal_span_surface(orig_tokens, t_i1, t_i2)
+                eq1_words = re.findall(r"[A-Za-z]+", eq1_text)
+                eq2_words = re.findall(r"[A-Za-z]+", eq2_trimmed)
+                mid_text = equal_span_surface(orig_tokens, mid[1], mid[2]) + equal_span_surface(
+                    rev_tokens, mid[3], mid[4]
                 )
-    return out
+                if (
+                    len(eq1_words) == 1
+                    and len(eq2_words) >= 1
+                    and not _equal_text_is_weak_anchor(eq2_trimmed)
+                    and (
+                        not re.search(r"[A-Za-z0-9]", mid_text)
+                        or re.fullmatch(r"[\s,;:.-]*", mid_text) is not None
+                    )
+                ):
+                    out.append(("replace", left[1], eq1[2], left[3], mid[4]))
+                    out.append(("equal", t_i1, t_i2, eq2[3] + (t_i1 - eq2[1]), eq2[3] + (t_i2 - eq2[1])))
+                    i += 4
+                    continue
+        out.append(opcodes[i])
+        i += 1
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _rotate_shared_punctuation_around_deleted_clause(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Rotate shared punctuation around ``equal -> delete -> equal`` boundaries.
+
+    This fixes cases like ``In addition, ...`` where the comma should stay plain,
+    not be shown as deleted, and the deleted clause should keep the trailing comma
+    before the next unchanged phrase.
+    """
+
+    def _shared_punct_ws_prefix_len(tokens: list, start: int, end: int) -> int:
+        k = 0
+        while start + k < end:
+            s = tokens[start + k].surface
+            if s.isspace() or re.fullmatch(r"[,\.;:]", s):
+                k += 1
+                continue
+            break
+        return k
+
+    if len(opcodes) < 3:
+        return opcodes
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    while i < len(opcodes):
+        if i + 2 < len(opcodes):
+            left = opcodes[i]
+            mid = opcodes[i + 1]
+            right = opcodes[i + 2]
+            if (
+                left[0] == "equal"
+                and mid[0] == "delete"
+                and right[0] == "equal"
+                and _tc_opcode_prefix_is_contiguous([left, mid, right])
+            ):
+                li1, li2, lj1, lj2 = left[1], left[2], left[3], left[4]
+                mi1, mi2 = mid[1], mid[2]
+                ri1, ri2, rj1, rj2 = right[1], right[2], right[3], right[4]
+                if li2 > li1 and lj2 > lj1:
+                    left_text = equal_span_surface(orig_tokens, li1, li2)
+                    if left_text and re.search(r"[A-Za-z]$", left_text):
+                        k_del = _shared_punct_ws_prefix_len(orig_tokens, mi1, mi2)
+                        k_eq_o = _shared_punct_ws_prefix_len(orig_tokens, ri1, ri2)
+                        k_eq_r = _shared_punct_ws_prefix_len(rev_tokens, rj1, rj2)
+                        k = min(k_del, k_eq_o, k_eq_r)
+                        if k > 0:
+                            del_prefix = equal_span_surface(orig_tokens, mi1, mi1 + k)
+                            eq_o_prefix = equal_span_surface(orig_tokens, ri1, ri1 + k)
+                            eq_r_prefix = equal_span_surface(rev_tokens, rj1, rj1 + k)
+                            if del_prefix == eq_o_prefix == eq_r_prefix:
+                                out.append(("equal", li1, li2 + k, lj1, lj2 + k))
+                                out.append(("delete", mi1 + k, mi2 + k, mid[3], mid[4]))
+                                out.append(("equal", ri1 + k, ri2, rj1 + k, rj2))
+                                i += 3
+                                continue
+        out.append(opcodes[i])
+        i += 1
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _equal_text_is_weak_anchor(text: str) -> bool:
+    """True for short stopword/citation equal islands that should not stand alone."""
+
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if stripped == ".":
+        return True
+    words = re.findall(r"[A-Za-z]+", stripped)
+    if not words:
+        return True
+    weak_words = {"the", "a", "an", "may", "of", "and", "or", "to", "in", "on", "with"}
+    return len(words) <= 2 and all(w.lower() in weak_words for w in words)
+
+
+def _absorb_weak_equal_islands_between_changes(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    Merge short weak ``equal`` spans into surrounding changes.
+
+    Word often absorbs tiny stopword/citation matches such as ``the``, ``may``,
+    or a citation prefix instead of emitting them as standalone plain-text anchors.
+    """
+
+    if len(opcodes) < 3:
+        return opcodes
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    while i < len(opcodes):
+        if i + 2 < len(opcodes):
+            left = opcodes[i]
+            mid = opcodes[i + 1]
+            right = opcodes[i + 2]
+            if (
+                left[0] != "equal"
+                and mid[0] == "equal"
+                and right[0] != "equal"
+                and _tc_opcode_prefix_is_contiguous([left, mid, right])
+            ):
+                mid_text = equal_span_surface(orig_tokens, mid[1], mid[2])
+                if (
+                    (mid[2] - mid[1]) <= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
+                    and _equal_text_is_weak_anchor(mid_text)
+                ):
+                    i1_lo = left[1]
+                    i2_hi = right[2]
+                    j1_lo = left[3]
+                    j2_hi = right[4]
+                    tag = "replace"
+                    if i1_lo == i2_hi:
+                        tag = "insert"
+                    elif j1_lo == j2_hi:
+                        tag = "delete"
+                    out.append((tag, i1_lo, i2_hi, j1_lo, j2_hi))
+                    i += 3
+                    continue
+        out.append(opcodes[i])
+        i += 1
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def _expand_replace_to_include_following_shared_ws_token(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
+) -> list[tuple[str, int, int, int, int]]:
+    """
+    When a ``replace`` is immediately followed by ``equal`` whose first token is
+    whitespace on both sides, fold that token into the ``replace``.
+
+    The outer LCS often leaves a shared space in the ``equal`` span (same ``norm_key``),
+    which would otherwise emit ``w:del``/``w:ins`` without the separator before the next
+    word. Moving one whitespace token into the replace keeps one del + one ins atomic
+    while preserving visible spacing (e.g. ``A `` / ``The 10 most ``).
+    """
+
+    out: list[tuple[str, int, int, int, int]] = []
+    i = 0
+    while i < len(opcodes):
+        tag, i1, i2, j1, j2 = opcodes[i]
+        if tag != "replace":
+            out.append((tag, i1, i2, j1, j2))
+            i += 1
+            continue
+        if i + 1 < len(opcodes):
+            ntag, ni1, ni2, nj1, nj2 = opcodes[i + 1]
+            if (
+                ntag == "equal"
+                and ni1 == i2
+                and nj1 == j2
+                and ni1 < ni2
+                and nj1 < nj2
+                and orig_tokens[ni1].surface.isspace()
+                and rev_tokens[nj1].surface.isspace()
+            ):
+                new_i2 = ni1 + 1
+                new_j2 = nj1 + 1
+                if new_i2 == ni2 and new_j2 == nj2:
+                    out.append(("replace", i1, new_i2, j1, new_j2))
+                    i += 2
+                    continue
+                out.append(("replace", i1, new_i2, j1, new_j2))
+                out.append(("equal", new_i2, ni2, new_j2, nj2))
+                i += 2
+                continue
+        out.append((tag, i1, i2, j1, j2))
+        i += 1
+    return _merge_adjacent_equal_opcodes(out)
+
+
+def classify_change(
+    orig_tokens: list,
+    rev_tokens: list,
+    ratio: float,
+) -> Literal["MICRO_EDIT", "PHRASE_EDIT", "HEAVY_EDIT", "FULL_REWRITE"]:
+    """Route concat-texts diff by :class:`~difflib.SequenceMatcher` ratio on norm keys."""
+
+    _ = orig_tokens, rev_tokens
+    if ratio > 0.92:
+        return "MICRO_EDIT"
+    if ratio > 0.75:
+        return "PHRASE_EDIT"
+    if ratio > 0.4:
+        return "HEAVY_EDIT"
+    return "FULL_REWRITE"
+
+
+def _max_digit_run_length(s: str) -> int:
+    best = cur = 0
+    for c in s:
+        if c.isdigit():
+            cur += 1
+            best = max(best, cur)
+        else:
+            cur = 0
+    return best
+
+
+def _concat_tc_collect_emitted_text(elements: list[ET.Element]) -> str:
+    parts: list[str] = []
+    for root in elements:
+        for el in root.iter():
+            if _local_name(el.tag) in ("t", "delText") and el.text:
+                parts.append(el.text)
+    return "".join(parts)
+
+
+def _concat_tc_emitted_numeric_corruption(
+    orig_text: str, rev_text: str, emitted_concat: str
+) -> bool:
+    """True if emitted text shows digit runs longer than in either source (merged-number glitch)."""
+
+    mo = _max_digit_run_length(orig_text)
+    mr = _max_digit_run_length(rev_text)
+    me = _max_digit_run_length(emitted_concat)
+    base = max(mo, mr)
+    if me <= base:
+        return False
+    if me >= 6 and me >= base + 2:
+        return True
+    if re.search(r"\d{4}\d{4,}", emitted_concat):
+        if not re.search(r"\d{4}\d{4,}", rev_text) and not re.search(
+            r"\d{4}\d{4,}", orig_text
+        ):
+            return True
+    return False
 
 
 def _track_change_elements_for_concat_texts(
@@ -759,50 +2142,180 @@ def _track_change_elements_for_concat_texts(
     author: str,
     date_iso: str,
 ) -> list[ET.Element]:
-    """Word/whitespace token diff → ``w:r`` / ``w:ins`` / ``w:del`` (shared by paragraph + TOC paths)."""
+    """Word / punctuation / whitespace LCS on norm keys → surfaces in ``w:r`` / ``w:ins`` / ``w:del``.
 
-    orig_tokens = _word_level_tokens(orig_text)
-    rev_tokens = _word_level_tokens(rev_text)
-    matcher = difflib.SequenceMatcher(None, orig_tokens, rev_tokens, autojunk=False)
+    Each ``replace`` opcode emits at most one ``w:del`` and one ``w:ins`` (joined token surfaces;
+    no nested diff inside the span).
+
+    When token LCS looks like a large rewrite (low match ratio, many opcodes), returns a single
+    ``w:del`` for *orig_text* and a single ``w:ins`` for *rev_text* instead of interleaved markup.
+
+    Verbose fragmentation trace (stderr): set ``MDC_DEBUG_TC_CONCAT_FRAGMENTS=1``, or use the
+    built-in example pair ``the name is kiran`` vs ``I am introduce as kiran`` (always traces).
+    """
+
+    orig_tokens = tokenize_for_lcs(orig_text)
+    rev_tokens = tokenize_for_lcs(rev_text)
+    total_orig_tokens = len(orig_tokens)
+    total_rev_tokens = len(rev_tokens)
+    if total_orig_tokens == 0 and total_rev_tokens > 0:
+        print(
+            "[MDC_DEBUG_TC_CONCAT_FRAG] STRUCTURAL_EMPTY_CASE_TRIGGERED "
+            "orig_tokens=0 rev_tokens>0 insert_only",
+            file=sys.stderr,
+        )
+        return [
+            _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+        ]
+    if total_rev_tokens == 0 and total_orig_tokens > 0:
+        print(
+            "[MDC_DEBUG_TC_CONCAT_FRAG] STRUCTURAL_EMPTY_CASE_TRIGGERED "
+            "rev_tokens=0 orig_tokens>0 delete_only",
+            file=sys.stderr,
+        )
+        return [
+            _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+        ]
+    matcher = difflib.SequenceMatcher(
+        None, norm_keys(orig_tokens), norm_keys(rev_tokens), autojunk=False
+    )
+    sm_match_ratio = matcher.ratio()
+    classification = classify_change(orig_tokens, rev_tokens, sm_match_ratio)
+    if classification == "FULL_REWRITE":
+        has_meaningful_matching_block = any(
+            block.size >= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
+            for block in matcher.get_matching_blocks()
+            if block.size > 0
+        )
+        if has_meaningful_matching_block:
+            classification = "HEAVY_EDIT"
+        else:
+            if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+                print(
+                    f"[MDC_DEBUG_TC_CONCAT_FRAG] CLASSIFY_FULL_REWRITE match_ratio={sm_match_ratio:.6f}",
+                    file=sys.stderr,
+                )
+            return [
+                _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+                _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+            ]
+    if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+        print(
+            f"[MDC_DEBUG_TC_CONCAT_FRAG] classification={classification} "
+            f"match_ratio={sm_match_ratio:.6f} "
+            f"n_orig_tokens={total_orig_tokens} n_rev_tokens={total_rev_tokens}",
+            file=sys.stderr,
+        )
+    maybe_log_lcs_debug("concat_texts", orig_tokens, rev_tokens, matcher)
+    opcodes = matcher.get_opcodes()
+    opcodes = _collapse_adjacent_replace_opcodes(opcodes, orig_tokens, rev_tokens)
+    opcodes = _refine_replace_boundaries(opcodes, orig_tokens, rev_tokens)
+    coalesced_suffix = _coalesce_opcodes_at_longest_common_token_suffix(
+        orig_tokens, rev_tokens, opcodes
+    )
+    if coalesced_suffix is not None:
+        opcodes = coalesced_suffix
+    else:
+        opcodes = _merge_unstable_opcode_regions(opcodes, orig_tokens, rev_tokens)
+    opcodes = _merge_change_cluster_between_meaningful_equals(opcodes)
+    opcodes = _split_replace_opcodes_on_internal_meaningful_equals(
+        opcodes, orig_tokens, rev_tokens
+    )
+    opcodes = _left_bias_internal_equal_between_changes(
+        opcodes, orig_tokens, rev_tokens
+    )
+    opcodes = _pull_meaningful_equal_earlier_from_long_left_replace(
+        opcodes, orig_tokens, rev_tokens
+    )
+    opcodes = _prefer_later_stronger_equal_anchor(
+        opcodes, orig_tokens, rev_tokens
+    )
+    opcodes = _dedupe_reinserted_equal_prefix(
+        opcodes, orig_tokens, rev_tokens
+    )
+    opcodes = _absorb_weak_equal_islands_between_changes(
+        opcodes, orig_tokens, rev_tokens
+    )
+    opcodes = _rotate_shared_punctuation_around_deleted_clause(
+        opcodes, orig_tokens, rev_tokens
+    )
+    opcodes = _expand_replace_to_include_following_shared_ws_token(
+        opcodes, orig_tokens, rev_tokens
+    )
+    matched_tc = deleted_tc = inserted_tc = 0
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            matched_tc += i2 - i1
+        elif tag == "delete":
+            deleted_tc += i2 - i1
+        elif tag == "insert":
+            inserted_tc += j2 - j1
+        elif tag == "replace":
+            deleted_tc += i2 - i1
+            inserted_tc += j2 - j1
+    opcode_count = len(opcodes)
+    denom = max(total_orig_tokens, total_rev_tokens)
+    match_ratio = (matched_tc / denom) if denom > 0 else 0.0
+    has_meaningful_equal = any(
+        tag == "equal" and (i2 - i1) >= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
+        for tag, i1, i2, _j1, _j2 in opcodes
+    )
+    collapse_rewrite = (
+        match_ratio < 0.35
+        and opcode_count >= 5
+        and (deleted_tc + inserted_tc) >= 4
+        and total_orig_tokens >= 4
+        and total_rev_tokens >= 4
+        and not has_meaningful_equal
+    )
+    if collapse_rewrite:
+        print(
+            "[MDC_DEBUG_TC_CONCAT_FRAG] COLLAPSE_REWRITE_TRIGGERED",
+            file=sys.stderr,
+        )
+        return [
+            _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+            _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+        ]
+    if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+        _log_tc_concat_fragmentation_trace(orig_text, rev_text, orig_tokens, rev_tokens, opcodes)
     out: list[ET.Element] = []
 
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+    for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
-            chunk = "".join(orig_tokens[i1:i2])
+            chunk = equal_span_surface(orig_tokens, i1, i2)
             if chunk:
                 out.extend(_w_runs_for_plain_text(chunk))
         elif tag == "delete":
-            chunk = "".join(orig_tokens[i1:i2])
+            chunk = equal_span_surface(orig_tokens, i1, i2)
             if chunk:
                 out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "insert":
-            chunk = "".join(rev_tokens[j1:j2])
+            chunk = equal_span_surface(rev_tokens, j1, j2)
             if chunk:
                 out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "replace":
-            before = "".join(orig_tokens[i1:i2])
-            after = "".join(rev_tokens[j1:j2])
-            if _replace_span_is_multi_token(before, after):
-                out.extend(
-                    _emit_word_token_track_change_fragment(
-                        before,
-                        after,
-                        id_counter=id_counter,
-                        author=author,
-                        date_iso=date_iso,
-                    )
-                )
-            else:
-                out.extend(
-                    _emit_single_token_replace_fragment(
-                        before,
-                        after,
-                        id_counter=id_counter,
-                        author=author,
-                        date_iso=date_iso,
-                    )
-                )
+            # Atomic replace only: one ``w:del`` + one ``w:ins`` (bypass any future replace branches).
+            before_text = equal_span_surface(orig_tokens, i1, i2)
+            after_text = equal_span_surface(rev_tokens, j1, j2)
+            if before_text:
+                out.append(_w_del_segment(before_text, _next_id(id_counter), author, date_iso))
+            if after_text:
+                out.append(_w_ins_segment(after_text, _next_id(id_counter), author, date_iso))
+            continue
 
+    if _concat_tc_emitted_numeric_corruption(
+        orig_text, rev_text, _concat_tc_collect_emitted_text(out)
+    ):
+        if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+            print(
+                "[MDC_DEBUG_TC_CONCAT_FRAG] NUMERIC_CORRUPTION_FALLBACK full_del_ins",
+                file=sys.stderr,
+            )
+        return [
+            _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+            _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+        ]
     return out
 
 
@@ -814,11 +2327,73 @@ def build_paragraph_track_change_elements(
     id_counter: list[int],
     author: str,
     date_iso: str,
+    source_p_el: ET.Element | None = None,
 ) -> list[ET.Element]:
     """Return ordered ``w:r`` / ``w:ins`` / ``w:del`` children for one ``w:p``."""
 
-    orig_text = _concat_paragraph_text(original, config)
-    rev_text = _concat_paragraph_text(revised, config)
+    dbg = _paragraph_track_change_build_debug_enabled()
+    orig_text: str | None = None
+    rev_text: str | None = None
+    if dbg:
+        orig_text = _concat_paragraph_text(original, config)
+        rev_text = _concat_paragraph_text(revised, config)
+        print("[MDC_DEBUG_PARAGRAPH_TC] build_paragraph_track_change_elements", file=sys.stderr)
+        print(f"[MDC_DEBUG_PARAGRAPH_TC]   repr(orig_text)={orig_text!r}", file=sys.stderr)
+        print(f"[MDC_DEBUG_PARAGRAPH_TC]   repr(rev_text)={rev_text!r}", file=sys.stderr)
+        print(
+            f"[MDC_DEBUG_PARAGRAPH_TC]   len(original.runs)={len(original.get('runs', []))} "
+            f"len(revised.runs)={len(revised.get('runs', []))}",
+            file=sys.stderr,
+        )
+        print(
+            f"[MDC_DEBUG_PARAGRAPH_TC]   orig_text_empty={orig_text == ''} "
+            f"rev_text_empty={rev_text == ''}",
+            file=sys.stderr,
+        )
+        _debug_log_concat_paragraph_runs("original", original, config, orig_text)
+        _debug_log_concat_paragraph_runs("revised", revised, config, rev_text)
+        print(
+            f"[MDC_DEBUG_PARAGRAPH_TC]   source_p_el is not None → "
+            f"preserving path will be tried first: {source_p_el is not None}",
+            file=sys.stderr,
+        )
+
+    if source_p_el is not None:
+        preserved = _try_build_track_changes_preserving_orig_runs(
+            source_p_el,
+            original,
+            revised,
+            config,
+            id_counter=id_counter,
+            author=author,
+            date_iso=date_iso,
+        )
+        if preserved is not None:
+            if dbg:
+                assert orig_text is not None and rev_text is not None
+                print(
+                    "[MDC_DEBUG_PARAGRAPH_TC]   branch=preserving_orig_runs (returned list, "
+                    "not concat fallback)",
+                    file=sys.stderr,
+                )
+                _debug_log_tc_sequence_opcodes(
+                    "preserving (same strings as _concat_paragraph_text / preserving inner LCS)",
+                    orig_text,
+                    rev_text,
+                )
+            return preserved
+        if dbg:
+            print(
+                "[MDC_DEBUG_PARAGRAPH_TC]   preserving path returned None "
+                "(DOM/IR mismatch or normalization length change); using concat fallback",
+                file=sys.stderr,
+            )
+
+    if orig_text is None:
+        orig_text = _concat_paragraph_text(original, config)
+        rev_text = _concat_paragraph_text(revised, config)
+    if dbg:
+        _debug_log_tc_sequence_opcodes("concat_fallback _track_change_elements_for_concat_texts", orig_text, rev_text)
     return _track_change_elements_for_concat_texts(
         orig_text,
         rev_text,
@@ -855,6 +2430,58 @@ def _toc_matched_line_needs_revision(
     return _token_level_text_differs(o, r)
 
 
+def _build_structured_toc_field_diff(
+    orig_text: str,
+    rev_text: str,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element] | None:
+    """
+    Tab-aware diff for TOC lines with stable field structure.
+
+    When both sides look like ``section<TAB>title<TAB>page``, keep the shared
+    section field and shared title prefix plain, then revise only the changed
+    title tail / page tail. This avoids matching a TOC tab to spaces inside the
+    revised title text.
+    """
+
+    ofields = orig_text.split("\t")
+    rfields = rev_text.split("\t")
+    if len(ofields) != 3 or len(rfields) != 3:
+        return None
+    if ofields[0] != rfields[0]:
+        return None
+    shared_title_prefix = []
+    for a, b in zip(ofields[1], rfields[1], strict=False):
+        if a != b:
+            break
+        shared_title_prefix.append(a)
+    shared = "".join(shared_title_prefix)
+    # Keep this path narrow: only use it when the TOC title shares a meaningful
+    # exact prefix that ends at a clean boundary.
+    if len(shared.strip()) < 8:
+        return None
+    if shared and shared[-1].isalnum():
+        return None
+
+    out: list[ET.Element] = []
+    if ofields[0]:
+        out.extend(_w_runs_for_plain_text(ofields[0]))
+    out.extend(_w_runs_for_plain_text("\t"))
+    if shared:
+        out.extend(_w_runs_for_plain_text(shared))
+
+    orig_tail = ofields[1][len(shared) :] + "\t" + ofields[2]
+    rev_tail = rfields[1][len(shared) :] + "\t" + rfields[2]
+    if orig_tail:
+        out.append(_w_del_segment(orig_tail, _next_id(id_counter), author, date_iso))
+    if rev_tail:
+        out.append(_w_ins_segment(rev_tail, _next_id(id_counter), author, date_iso))
+    return out
+
+
 def _build_toc_matched_line_track_change_elements(
     original: BodyParagraph,
     revised: BodyParagraph,
@@ -868,13 +2495,21 @@ def _build_toc_matched_line_track_change_elements(
 
     orig_text = _concat_paragraph_text_toc_track_layout(original, config)
     rev_text = _concat_paragraph_text_toc_track_layout(revised, config)
-    out = _track_change_elements_for_concat_texts(
+    out = _build_structured_toc_field_diff(
         orig_text,
         rev_text,
         id_counter=id_counter,
         author=author,
         date_iso=date_iso,
     )
+    if out is None:
+        out = _track_change_elements_for_concat_texts(
+            orig_text,
+            rev_text,
+            id_counter=id_counter,
+            author=author,
+            date_iso=date_iso,
+        )
     # TOC heading/list page-number deltas (e.g. 1 -> 2) can create noisy "Deleted: 1"
     # balloons near the front-matter heading block. Limit numeric-delete suppression to
     # those heading/list lines so deeper TOC entries still keep numeric-only del markers.
@@ -1303,7 +2938,16 @@ def _apply_track_changes_to_structural_container(
             rev_insert_count = 0
             if oi >= len(block_els):
                 continue
-            oblock, rblock = ob[oi], rb[rj]
+            oblock = ob[oi]
+            rblock = rb[rj]
+            merge_end = al.revised_merge_end_exclusive
+            if merge_end is not None and (merge_end <= rj or merge_end > len(rb)):
+                merge_end = None
+            rev_para_for_diff: BodyParagraph
+            if merge_end is not None:
+                rev_para_for_diff = _merged_body_paragraph_from_span(rb, rj, merge_end)
+            else:
+                rev_para_for_diff = rblock  # type: ignore[assignment]
             el = block_els[oi]
             if oblock.get("type") == "table" and rblock.get("type") == "table":
                 if _local_name(el.tag) != "tbl":
@@ -1332,7 +2976,57 @@ def _apply_track_changes_to_structural_container(
             if _local_name(el.tag) != "p":
                 continue
             orig_para: BodyParagraph = oblock  # type: ignore[assignment]
-            rev_para: BodyParagraph = rblock  # type: ignore[assignment]
+            split_pairs: list[tuple[BodyParagraph, BodyParagraph]] | None = None
+            split_rev_elements: list[ET.Element | None] = []
+            if merge_end is not None:
+                revised_span = [
+                    rb[k] for k in range(rj, merge_end) if rb[k].get("type") == "paragraph"
+                ]
+                if len(revised_span) == (merge_end - rj):
+                    split_pairs = _split_original_paragraph_for_revised_span(
+                        orig_para,
+                        revised_span,  # type: ignore[arg-type]
+                        config,
+                    )
+                    if split_pairs is not None:
+                        for k in range(rj, merge_end):
+                            rev_el: ET.Element | None = None
+                            if (
+                                revised_block_elements is not None
+                                and k < len(revised_block_elements)
+                                and _local_name(revised_block_elements[k].tag) == "p"
+                            ):
+                                rev_el = revised_block_elements[k]
+                            split_rev_elements.append(rev_el)
+            if split_pairs is not None:
+                first_orig, first_rev = split_pairs[0]
+                if _paragraph_needs_revision(first_orig, first_rev, config):
+                    first_kids = build_paragraph_track_change_elements(
+                        first_orig,
+                        first_rev,
+                        config,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                    _replace_p_content_preserving_p_pr(el, first_kids)
+                insert_at = list(container).index(el) + 1
+                for extra_idx, (extra_orig, extra_rev) in enumerate(split_pairs[1:], start=1):
+                    extra_p = _new_w_p_from_matched_paragraph_diff(
+                        extra_orig,
+                        extra_rev,
+                        config,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                        revised_p_el=split_rev_elements[extra_idx]
+                        if extra_idx < len(split_rev_elements)
+                        else None,
+                    )
+                    container.insert(insert_at, extra_p)
+                    insert_at += 1
+                continue
+            rev_para: BodyParagraph = rev_para_for_diff
             rev_el_for_match: ET.Element | None = None
             if (
                 revised_block_elements is not None
@@ -1361,6 +3055,7 @@ def _apply_track_changes_to_structural_container(
                     id_counter=id_counter,
                     author=author,
                     date_iso=date_iso,
+                    source_p_el=el,
                 )
             _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is not None and rj is None:
@@ -1396,6 +3091,7 @@ def _apply_track_changes_to_structural_container(
                     id_counter=id_counter,
                     author=author,
                     date_iso=date_iso,
+                    source_p_el=el,
                 )
                 _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is None and rj is not None:
@@ -1529,11 +3225,9 @@ def _apply_table_cell_track_changes(
         return
     orig_text = "".join(str(r.get("text", "")) for r in orig_para.get("runs", []))
     rev_text = "".join(str(r.get("text", "")) for r in rev_para.get("runs", []))
-    orig_words = [t for t in _word_level_tokens(orig_text) if not t.isspace()]
-    rev_words = [t for t in _word_level_tokens(rev_text) if not t.isspace()]
-    word_overlap = difflib.SequenceMatcher(
-        None, orig_words, rev_words, autojunk=False
-    ).ratio()
+    orig_words = norm_keys([x for x in tokenize_for_lcs(orig_text) if not x.surface.isspace()])
+    rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
+    word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
 
     # For table cells, very low-overlap long text should render as full-line
     # replacement (one del line + one ins line) so Word balloons show the
@@ -1544,7 +3238,7 @@ def _apply_table_cell_track_changes(
         orig_text
         and rev_text
         and min(len(orig_words), len(rev_words)) >= 4
-        and word_overlap < 0.35
+        and word_overlap < _TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX
     ):
         new_kids = [
             _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
@@ -1563,6 +3257,137 @@ def _apply_table_cell_track_changes(
     _replace_p_content_preserving_p_pr(first_p, new_kids)
     for extra in _tc_direct_paragraph_elements(tc_el)[1:]:
         tc_el.remove(extra)
+
+
+def _merged_body_paragraph_from_span(
+    rb: list, start: int, end_exclusive: int
+) -> BodyParagraph:
+    """Concatenate revised ``w:p`` IR blocks ``[start, end_exclusive)`` for SCRUM-121 split merge."""
+
+    if start < 0 or end_exclusive <= start or end_exclusive > len(rb):
+        raise ValueError("invalid revised span for merged paragraph")
+    runs: list = []
+    first_id = str(rb[start]["id"])
+    for k in range(start, end_exclusive):
+        runs.extend(rb[k].get("runs", []))  # type: ignore[union-attr]
+    return {"type": "paragraph", "id": first_id, "runs": runs}
+
+
+def _paragraph_from_text_like(source: BodyParagraph, text: str) -> BodyParagraph:
+    """Paragraph IR using *text* as one run, preserving basic shape from *source*."""
+
+    return {
+        "type": "paragraph",
+        "id": str(source.get("id", "_")),
+        "runs": [{"text": text}],
+    }
+
+
+def _leading_word_prefix(text: str, *, n_words: int) -> str:
+    """Leading substring containing up to *n_words* non-space word tokens."""
+
+    if not text:
+        return ""
+    out: list[str] = []
+    words = 0
+    for tok in tokenize_for_lcs(text):
+        out.append(tok.surface)
+        if tok.surface.strip() and re.search(r"\w", tok.surface):
+            words += 1
+            if words >= n_words:
+                break
+    return "".join(out)
+
+
+def _find_revised_paragraph_anchor_in_original(
+    orig_text: str,
+    revised_text: str,
+    *,
+    start_at: int,
+) -> int | None:
+    """
+    Char offset where a later revised paragraph re-anchors inside *orig_text*.
+
+    This supports the sponsor/Word behavior where one original paragraph can split
+    across multiple compared paragraphs when the revised document introduces a new
+    paragraph at a sentence that already existed later in the original paragraph.
+    """
+
+    prefix = _leading_word_prefix(revised_text, n_words=_MERGED_PARA_SPLIT_PREFIX_WORDS).strip()
+    if not prefix:
+        return None
+    pos = orig_text.find(prefix, start_at)
+    if pos <= 0:
+        return None
+    return pos
+
+
+def _split_original_paragraph_for_revised_span(
+    orig_para: BodyParagraph,
+    revised_paras: list[BodyParagraph],
+    config: CompareConfig,
+) -> list[tuple[BodyParagraph, BodyParagraph]] | None:
+    """
+    Split one original paragraph into multiple compared paragraph pairs when possible.
+
+    Returns ``[(orig_chunk0, rev0), (orig_chunk1, rev1), ...]`` when every later
+    revised paragraph begins with a strong prefix that also appears later in the
+    original paragraph text. Otherwise returns ``None``.
+    """
+
+    if len(revised_paras) <= 1:
+        return None
+    orig_text = _concat_paragraph_text(orig_para, config)
+    split_points = [0]
+    search_start = 1
+    for rev_para in revised_paras[1:]:
+        rev_text = _concat_paragraph_text(rev_para, config)
+        pos = _find_revised_paragraph_anchor_in_original(
+            orig_text,
+            rev_text,
+            start_at=search_start,
+        )
+        if pos is None:
+            return None
+        split_points.append(pos)
+        search_start = pos + 1
+    split_points.append(len(orig_text))
+    out: list[tuple[BodyParagraph, BodyParagraph]] = []
+    for idx, rev_para in enumerate(revised_paras):
+        lo = split_points[idx]
+        hi = split_points[idx + 1]
+        if lo >= hi:
+            return None
+        out.append((_paragraph_from_text_like(orig_para, orig_text[lo:hi]), rev_para))
+    return out
+
+
+def _new_w_p_from_matched_paragraph_diff(
+    orig_para: BodyParagraph,
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+    revised_p_el: ET.Element | None = None,
+) -> ET.Element:
+    """A new ``w:p`` containing matched paragraph revisions for *orig_para* vs *rev_para*."""
+
+    kids = build_paragraph_track_change_elements(
+        orig_para,
+        rev_para,
+        config,
+        id_counter=id_counter,
+        author=author,
+        date_iso=date_iso,
+    )
+    p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
+    if revised_p_el is not None:
+        _copy_revised_p_pr_to_inserted_paragraph(p_el, revised_p_el)
+    for node in kids:
+        p_el.append(node)
+    return p_el
 
 
 def _empty_body_paragraph() -> BodyParagraph:

@@ -3,6 +3,8 @@ from engine.paragraph_alignment import (
     ParagraphAlignment,
     align_paragraphs,
     alignment_for_track_changes_emit,
+    _repair_alignment_orig_para_rev_split_merge,
+    _repair_alignment_unmatched_rev_expansion_override,
 )
 
 
@@ -180,6 +182,78 @@ def test_alignment_pairs_primary_endpoint_paragraph_when_extra_paragraph_at_end(
     assert (2, 2) in pairs, pairs
 
 
+def test_alignment_near_index_word_jaccard_pairs_after_insert() -> None:
+    """Near-diagonal paragraph with heavy char churn but same vocabulary still matches.
+
+    Without a word-bag signal, ``quick_ratio`` on raw strings can be low while the
+    revised block is still the edited same paragraph (one ``w:p`` inserted above).
+    """
+
+    long_shared = ("token " * 60).strip()
+    short_shared = ("token " * 24).strip()
+    original = {"version": 1, "blocks": [_p("A"), _p(long_shared), _p("Z")]}
+    revised = {
+        "version": 1,
+        "blocks": [
+            _p("A"),
+            _p("Inserted paragraph between anchors."),
+            _p(short_shared),
+            _p("Z"),
+        ],
+    }
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+    assert (1, 2) in pairs, pairs
+
+
+def test_repair_unmatched_rev_expansion_override_merges_false_delete_insert() -> None:
+    """Post-LCS repair pairs (o,None)+(None,r) when rank, gates, and containment allow."""
+
+    short = "Section one establishes inclusion criteria for adult patients enrolled."
+    # Mild suffix keeps _pair_rank_similarity above the override floor (heavy
+    # appended text drives char/tok ratio down and the repair correctly skips).
+    long_rev = short + " Extra."
+    original = {"version": 1, "blocks": [_p("x"), _p(short), _p("z")]}
+    revised = {
+        "version": 1,
+        "blocks": [
+            _p("x"),
+            _p("noise paragraph inserted between anchors."),
+            _p(long_rev),
+            _p("z"),
+        ],
+    }
+    cfg = DEFAULT_WORD_LIKE_COMPARE_CONFIG
+    raw = [
+        ParagraphAlignment(0, 0),
+        ParagraphAlignment(1, None),
+        ParagraphAlignment(None, 1),
+        ParagraphAlignment(None, 2),
+        ParagraphAlignment(2, 3),
+    ]
+    repaired = _repair_alignment_unmatched_rev_expansion_override(
+        raw, original, revised, cfg
+    )
+    pairs = [(a.original_paragraph_index, a.revised_paragraph_index) for a in repaired]
+    assert (1, 2) in pairs, pairs
+    assert (1, None) not in pairs and (None, 2) not in pairs
+
+
+def test_alignment_length_weak_prefix_expansion_pairs_with_insert_above() -> None:
+    """Short original paragraph expanded to many chars still matches after an insert."""
+
+    short = "Section one establishes inclusion criteria for adult patients enrolled."
+    long_rev = short + (" more detail." * 40)
+    original = {"version": 1, "blocks": [_p("x"), _p(short), _p("z")]}
+    revised = {
+        "version": 1,
+        "blocks": [_p("x"), _p("Inserted paragraph."), _p(long_rev), _p("z")],
+    }
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+    assert (1, 2) in pairs, pairs
+
+
 def test_alignment_fuzzy_pairs_edited_paragraph_when_signatures_differ() -> None:
     """Edited same sentence must align (not delete+insert whole block) when counts differ."""
     s1 = "The study will enroll 100 participants at three sites."
@@ -248,5 +322,43 @@ def test_alignment_emit_pairs_tables_after_revised_only_paragraph_scrum120() -> 
         (1, 1),
         (None, 2),
         (2, 3),
+    ]
+
+
+def test_repair_scrum121_merges_orig_only_then_rev_split_paragraphs() -> None:
+    """SCRUM-121: (oi, None) + (None, r0) + (None, r1) + (oi+1, *) → merged revised span."""
+
+    shared = " ".join(["SHAREDWORD"] * 15)
+    original = {
+        "version": 1,
+        "blocks": [
+            _p("x"),
+            _p("alpha beta gamma delta epsilon " + shared),
+            _p("z"),
+        ],
+    }
+    revised = {
+        "version": 1,
+        "blocks": [
+            _p("x"),
+            _p("completely new opening sentence here "),
+            _p(shared),
+            _p("z"),
+        ],
+    }
+    raw_lcs = [
+        ParagraphAlignment(0, 0),
+        ParagraphAlignment(1, None),
+        ParagraphAlignment(None, 1),
+        ParagraphAlignment(None, 2),
+        ParagraphAlignment(2, 3),
+    ]
+    repaired = _repair_alignment_orig_para_rev_split_merge(
+        raw_lcs, original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG
+    )
+    assert repaired == [
+        ParagraphAlignment(0, 0),
+        ParagraphAlignment(1, 1, revised_merge_end_exclusive=3),
+        ParagraphAlignment(2, 3),
     ]
 

@@ -11,6 +11,7 @@ import pytest
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
 from engine.body_revision_emit import (
     _build_toc_matched_line_track_change_elements,
+    _word_token_similarity_ratio,
     build_paragraph_track_change_elements,
     emit_docx_with_body_track_changes,
     emit_docx_with_package_track_changes,
@@ -174,6 +175,42 @@ def test_toc_matched_line_track_change_preserves_w_tab_with_ignore_whitespace() 
     assert any("SCOPE" in _collect_t_text(i) for i in inses)
 
 
+def test_toc_matched_line_track_change_keeps_shared_title_prefix_before_product_and_page() -> None:
+    """TOC line with same section/title prefix should not degrade to whole-line del/ins."""
+    orig = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "2\tSCOPE OF MEDICAL PRODUCT DEVELOPMENT PROGRAM: MK-2870\t11"}],
+    }
+    rev = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "2\tSCOPE OF MEDICAL PRODUCT DEVELOPMENT PROGRAM: sacituzumab tirumotecan\t18"}],
+    }
+
+    els = _build_toc_matched_line_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-17T00:00:00Z",
+    )
+
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
+
+    p_xml = ET.Element(f"{{{WORD_NS}}}p")
+    for el in els:
+        p_xml.append(el)
+    assert len(p_xml.findall(".//w:tab", NS)) >= 2
+    assert plain.startswith("2SCOPE OF MEDICAL PRODUCT DEVELOPMENT PROGRAM: ")
+    assert len(dels) == 1 and len(inses) == 1
+    assert "MK-2870" in _collect_del_text(dels[0])
+    assert "sacituzumab tirumotecan" in _collect_t_text(inses[0])
+
+
 def test_build_paragraph_track_change_preserves_unchanged_date_year_suffix() -> None:
     """SCRUM-105: only changed date core should be revised; -2025 remains unchanged."""
     orig = _paragraph_block("Release Date:\t09-APR-2025")
@@ -197,8 +234,371 @@ def test_build_paragraph_track_change_preserves_unchanged_date_year_suffix() -> 
     assert len(p_xml.findall(".//w:tab", NS)) >= 1
     assert "Release Date:" in plain_r_text
     assert "-2025" in plain_r_text
-    assert del_text == "09-APR"
-    assert ins_text == "30-MAY"
+    # Hyphens are separate punctuation tokens; date month/day appear in del/ins.
+    assert "09" in del_text and "APR" in del_text
+    assert "30" in ins_text and "MAY" in ins_text
+
+
+def test_build_paragraph_track_change_alphabetic_word_replace_no_character_peel() -> None:
+    """Alphabetic single-token replace must not split inside the word (avoids garbled order)."""
+    orig = _paragraph_block("Say the cat")
+    rev = _paragraph_block("Say hte cat")
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-10T00:00:00Z",
+    )
+    kinds = [_local_name(e.tag) for e in els]
+    assert kinds == ["r", "del", "ins", "r"]
+    assert _collect_t_text(els[0]).endswith("Say ")
+    assert _collect_del_text(els[1]) == "the "
+    assert _collect_t_text(els[2]) == "hte "
+    assert _collect_t_text(els[3]) == "cat"
+    flat = "".join(
+        _collect_t_text(e) if _local_name(e.tag) != "del" else _collect_del_text(e)
+        for e in els
+    )
+    assert flat == "Say the hte cat"
+
+
+def test_build_paragraph_track_change_suffix_coalesce_stable_tail_after_phrase_edit() -> None:
+    """SCRUM-121: shared token before a stable tail stays in one replace; tail stays plain ``w:r``."""
+    orig = _paragraph_block("A recently published study")
+    rev = _paragraph_block("The 10 most recently published study")
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-11T00:00:00Z",
+    )
+    assert [_local_name(e.tag) for e in els] == ["del", "ins", "r"]
+    assert _collect_del_text(els[0]) == "A recently "
+    assert _collect_t_text(els[1]) == "The 10 most recently "
+    assert _collect_t_text(els[2]) == "published study"
+
+
+def test_build_paragraph_track_change_merges_fragmented_rewrite_between_plain_anchors() -> None:
+    """Expanded rewrite between strong equal anchors should not fragment into many tiny del/ins pairs."""
+    orig = _paragraph_block(
+        "A recently published study women in the US had the highest incidence rates of "
+        "cervical SCC [Ref. 5.4: OLD]. "
+    )
+    rev = _paragraph_block(
+        "The 10 most common oncogenic HPV types among women in the US are 16, 18, 31, and 59. "
+        "Approximately 3.9% of women in the general population are infected with cervical HPV "
+        "types 16 or 18 [Ref. 5.4: NEW]. "
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-16T00:00:00Z",
+    )
+    kinds = [_local_name(e.tag) for e in els]
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
+    assert "women in the US" in plain
+    assert "[Ref. 5.4:" in plain
+    assert len(dels) <= 5 and len(inses) <= 5, kinds
+    assert "highest incidence rates" in "".join(_collect_del_text(e) for e in dels)
+    assert "general population are infected" in "".join(_collect_t_text(e) for e in inses)
+
+
+def test_build_paragraph_track_change_keeps_multiple_meaningful_equal_anchors() -> None:
+    """Do not collapse anchored multi-clause paragraph rewrites into one giant replace."""
+    orig = _paragraph_block(
+        "Based on SEER data between 2000 and 2018, the percentage of non-Hispanic Black "
+        "patients increased steadily from those who were diagnosed at localized stage to "
+        "those diagnosed at distant stage. However, the percentage of non-Hispanic White "
+        "and Hispanic patients diagnosed for cervical cancer remained consistent across the "
+        "stages [Ref. 5.4: 08BZMY]. In addition, it was observed that in White women, "
+        "incidence rates of SCC and adenocarcinoma peaked between the ages of 35-44 years "
+        "and remained stable thereafter, whereas the incidence rates continued to increase "
+        "with age among Black women, peaking between the ages of 65-74 years for both subtypes."
+    )
+    rev = _paragraph_block(
+        "Based on SEER data between 2000 and 2018, the percentage of non-Hispanic Black "
+        "females diagnosed with cervical cancer increased steadily from those who were "
+        "diagnosed at localized stage to those diagnosed at distant stage. However, the "
+        "percentage of non-Hispanic White and Hispanic patients diagnosed for cervical cancer "
+        "remained consistent across the stages. In addition, incidence rates of SCC and "
+        "adenocarcinoma in White women peaked between the ages of 35 to 44 years and remained "
+        "stable thereafter, whereas the incidence rates continued to increase with age among "
+        "Black women, peaking between the ages of 65 to 74 years for both subtypes."
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-16T00:00:00Z",
+    )
+    kinds = [_local_name(e.tag) for e in els]
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
+    assert kinds != ["del", "ins", "r"], kinds
+    assert len(dels) >= 4 and len(inses) >= 4, kinds
+    assert "Based on SEER data between 2000 and 2018, the percentage of non-Hispanic Black " in plain
+    assert "However, the percentage of non-Hispanic White and Hispanic patients diagnosed for cervical cancer remained consistent across the stages" in plain
+    assert "incidence rates of SCC and adenocarcinoma" in plain
+    assert any("patients " == _collect_del_text(e) for e in dels)
+    assert any(
+        "females diagnosed with cervical cancer " == _collect_t_text(e) for e in inses
+    )
+
+
+def test_build_paragraph_track_change_splits_asymmetric_replace_on_internal_phrase() -> None:
+    """A coarse replace can still preserve an internal reused phrase like ``In addition``."""
+    orig = _paragraph_block(
+        "Based on SEER data between 2000 and 2018, patients increased steadily. "
+        "[Ref. 5.4: 08BZMY]. In addition, it was observed that in White women, incidence rates rose."
+    )
+    rev = _paragraph_block(
+        "Based on SEER data between 2000 and 2018, females diagnosed with cervical cancer increased steadily. "
+        ". In addition, incidence rates rose."
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-16T00:00:00Z",
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    dels = [_collect_del_text(e) for e in els if _local_name(e.tag) == "del"]
+    assert "In addition" in plain
+    assert sum(1 for e in els if _local_name(e.tag) == "del") >= 2
+    assert any("it was observed that in White women" in chunk for chunk in dels)
+
+
+def test_build_paragraph_track_change_splits_replace_on_multiple_short_nonweak_anchors() -> None:
+    """Multiple short non-weak anchors inside a large replace should still split the span."""
+    orig = _paragraph_block(
+        "had the highest incidence rates of cervical SCC compared with other racial and ethnic groups"
+    )
+    rev = _paragraph_block(
+        "are 16, 18, and 59. Approximately 3.9% of women are infected with cervical HPV types compared with non-Hispanic groups"
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-17T00:00:00Z",
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    assert "cervical " in plain
+    assert "compared with " in plain
+    assert "groups" in plain
+
+
+def test_build_paragraph_track_change_prefers_earlier_repeated_internal_anchor() -> None:
+    """Repeated equal text inside a coarse replace should anchor to the earlier semantic match."""
+    orig = _paragraph_block(
+        "had the highest incidence rates of cervical SCC compared with other racial and ethnic groups, "
+        "while the incidence of cervical adenocarcinoma was highest among White and Hispanic women."
+    )
+    rev = _paragraph_block(
+        "are 16, 18, 31, 39, 45, 51, 52, 56, 58, and 59. Approximately 3.9% of women in the general "
+        "population are infected with cervical HPV types 16 or 18 at any given time, and these 2 types "
+        "account for 71.2% of invasive cervical cancers [Ref. 5.4: 08S7BQ]. An evaluation of 26,302 US "
+        "gynecologic cytology specimens reported a higher prevalence of non-16/18 highrisk HPV among Black "
+        "women (15%) compared with White women (9%) [Ref. 5.4: 08D7B6]. A recent study of 60 patients with "
+        "cervical carcinoma where 90% self-identified as Black or African American, found non16/18 HPV "
+        "genotypes to be more prevalent than 16/18 HPV genotypes. Notably, the study identified HPV 35 as "
+        "the most frequently isolated high-risk genotype in the Black patient population [Ref. 5.4: 08D7B3]. "
+        "A large proportion of cases of cervical intraepithelial neoplasia Grade 3 have also been attributed "
+        "to HPV 35 in non-Hispanic Black women compared with non-Hispanic Asian or Pacific Islander, "
+        "non-Hispanic White, and Hispanic women [Ref. 5.4: 08FCRY]."
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-17T00:00:00Z",
+    )
+    chunks = []
+    for el in els:
+        tag = _local_name(el.tag)
+        if tag == "r":
+            chunks.append((tag, _collect_t_text(el)))
+        elif tag == "del":
+            chunks.append((tag, _collect_del_text(el)))
+        elif tag == "ins":
+            chunks.append((tag, _collect_t_text(el)))
+    scc_idx = next(i for i, (tag, text) in enumerate(chunks) if tag == "del" and text == "SCC ")
+    next_tag, next_text = chunks[scc_idx + 1]
+    assert next_tag == "ins"
+    assert "HPV types 16 or 18" in next_text
+    assert next_text.startswith("HPV types 16 or 18")
+
+
+def test_build_paragraph_track_change_rotates_shared_punctuation_around_deleted_clause() -> None:
+    """Comma/space around a deleted clause should stay plain when shared by both sides."""
+    orig = _paragraph_block("Alpha. In addition, it was observed that in White women, incidence rates rose.")
+    rev = _paragraph_block("Alpha. In addition, incidence rates rose.")
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-17T00:00:00Z",
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    dels = [_collect_del_text(e) for e in els if _local_name(e.tag) == "del"]
+    assert "In addition, " in plain
+    assert any(chunk.startswith("it was observed") for chunk in dels)
+    assert any(chunk.endswith(", ") for chunk in dels)
+
+
+def test_build_paragraph_track_change_dedupes_reinserted_plain_anchor() -> None:
+    """A repeated anchor should not survive as both plain text and a duplicate insert."""
+    orig = _paragraph_block(
+        "However, the percentage remained consistent [Ref. 5.4: 08BZMY]. In addition, "
+        "it was observed that in White women, incidence rates of SCC and adenocarcinoma peaked "
+        "between the ages of 35-44 years."
+    )
+    rev = _paragraph_block(
+        "However, the percentage remained consistent. In addition, incidence rates of SCC and "
+        "adenocarcinoma in White women peaked between the ages of 35 to 44 years."
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-17T00:00:00Z",
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    inses = [_collect_t_text(e) for e in els if _local_name(e.tag) == "ins"]
+    dels = [_collect_del_text(e) for e in els if _local_name(e.tag) == "del"]
+    assert "In addition, " in plain
+    assert not any(chunk == "In addition" for chunk in inses)
+    assert any("it was observed that in White women" in chunk for chunk in dels)
+
+
+def test_build_paragraph_track_change_absorbs_weak_short_equal_anchor() -> None:
+    """Short weak anchors like ``may`` should merge into surrounding changes."""
+    orig = _paragraph_block(
+        "Disparities in cervical cancer incidence and mortality in the US may be partly attributed to differences in access to healthcare."
+    )
+    rev = _paragraph_block(
+        "Disparities in cervical cancer incidence and mortality exist by geographic area, which may reflect differences in access to health care."
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-16T00:00:00Z",
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    assert "may " not in plain
+
+
+def test_build_paragraph_track_change_preserving_source_p_el_clones_run_properties() -> None:
+    """When *source_p_el* matches IR runs, unchanged spans emit cloned ``w:r`` with same ``w:rPr``."""
+
+    def r_with_pr(text: str, *, bold: bool = False, italic: bool = False) -> ET.Element:
+        r = ET.Element(f"{{{WORD_NS}}}r")
+        if bold or italic:
+            rpr = ET.SubElement(r, f"{{{WORD_NS}}}rPr")
+            if bold:
+                ET.SubElement(rpr, f"{{{WORD_NS}}}b")
+            if italic:
+                ET.SubElement(rpr, f"{{{WORD_NS}}}i")
+        t = ET.SubElement(r, f"{{{WORD_NS}}}t")
+        t.text = text
+        return r
+
+    p = ET.Element(f"{{{WORD_NS}}}p")
+    p.append(r_with_pr("Say ", bold=True))
+    p.append(r_with_pr("the cat", italic=True))
+
+    orig = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "Say "}, {"text": "the cat"}],
+    }
+    rev = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "Say hte cat"}],
+    }
+
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-11T00:00:00Z",
+        source_p_el=p,
+    )
+
+    assert [_local_name(e.tag) for e in els] == ["r", "del", "ins", "r"]
+    assert els[0].find("w:rPr/w:b", NS) is not None
+    assert _collect_t_text(els[0]) == "Say "
+    assert _collect_del_text(els[1]) == "the "
+    assert _collect_t_text(els[2]) == "hte "
+    assert els[3].find("w:rPr/w:i", NS) is not None
+    assert _collect_t_text(els[3]) == "cat"
+
+
+def test_build_paragraph_preserving_refines_multi_token_replace_span() -> None:
+    """Run-preserving path: equal spans stay plain ``w:r``; replace is one ``w:del`` + one ``w:ins``."""
+    full_o = "LEFT KEEP MID1 MID2 RIGHT KEEP"
+    full_r = "LEFT KEEP NEW1 NEW2 RIGHT KEEP"
+    p = ET.Element(f"{{{WORD_NS}}}p")
+    r_el = ET.Element(f"{{{WORD_NS}}}r")
+    t = ET.SubElement(r_el, f"{{{WORD_NS}}}t")
+    t.text = full_o
+    p.append(r_el)
+    orig = {"type": "paragraph", "id": "p1", "runs": [{"text": full_o}]}
+    rev = {"type": "paragraph", "id": "p1", "runs": [{"text": full_r}]}
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-11T12:00:00Z",
+        source_p_el=p,
+    )
+    del_text = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    ins_text = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "ins")
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    assert "LEFT KEEP" in plain and "RIGHT KEEP" in plain
+    assert "LEFT" not in del_text and "RIGHT" not in del_text
+    assert "MID1" in del_text and "MID2" in del_text
+    assert "NEW1" in ins_text and "NEW2" in ins_text
+
+
+def test_word_token_similarity_ratio_unrelated_is_below_coalesce_threshold() -> None:
+    """Unrelated token lists score low on non-whitespace norm-key similarity."""
+    assert _word_token_similarity_ratio("a b c d e", "v w x y z") < 0.20
+
+
+def test_word_token_similarity_ratio_shared_structure_scores_higher() -> None:
+    """Shared vocabulary yields higher similarity than unrelated text."""
+    assert _word_token_similarity_ratio("foo bar hello world", "foo bar goodbye world") >= 0.20
 
 
 def test_build_paragraph_track_change_delete_has_del_with_del_text() -> None:
@@ -217,8 +617,8 @@ def test_build_paragraph_track_change_delete_has_del_with_del_text() -> None:
     assert _collect_del_text(dels[0]) == " world"
 
 
-def test_build_paragraph_track_change_unrelated_phrase_not_single_del() -> None:
-    """Long unrelated edits must not collapse to one ``w:del`` for the whole tail."""
+def test_build_paragraph_track_change_unrelated_phrase_block_del_ins() -> None:
+    """Large rewrites use one ``w:del`` + ``w:ins`` per multi-token replace opcode (no nested word LCS)."""
     orig = _paragraph_block(
         "The primary endpoint is overall response rate at week 12."
     )
@@ -234,14 +634,15 @@ def test_build_paragraph_track_change_unrelated_phrase_not_single_del() -> None:
         date_iso="2026-03-28T00:00:00Z",
     )
     dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
     del_chunks = [_collect_del_text(d) for d in dels]
-    assert len(dels) >= 4
-    assert "overall" in del_chunks
-    assert "response" in del_chunks
-    assert "rate" in del_chunks
-    assert not any(
-        "overall response rate" in chunk and len(chunk) > 20 for chunk in del_chunks
-    )
+    ins_chunks = [_collect_t_text(i) for i in inses]
+    joined_del = "".join(del_chunks)
+    joined_ins = "".join(ins_chunks)
+    assert "overall" in joined_del and "response" in joined_del and "rate" in joined_del
+    assert "progression" in joined_ins and "survival" in joined_ins
+    assert "12" in joined_del and "24" in joined_ins
+    assert len(dels) >= 1 and len(inses) >= 1
 
 
 def test_build_paragraph_track_change_toc_line_preserves_w_tab_around_page_change() -> None:
@@ -916,7 +1317,56 @@ def test_emit_zip_output_primary_endpoint_not_one_whole_paragraph_del(tmp_path: 
     dels = p3.findall(".//w:del", NS)
     del_chunks = [_collect_del_text(d) for d in dels]
     assert old_ep not in del_chunks
-    assert "overall" in del_chunks
+    assert any("overall" in c for c in del_chunks)
+
+
+def test_scrum121_cervical_disparities_inline_track_changes_not_full_paragraph_del(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-121: cervical sample should group inline diff and preserve sponsor-like paragraph split."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum121_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    anchor = "ArecentlypublishedstudybasedonSEERdata"
+    target_p = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if anchor
+            in (_collect_t_text(p) + _collect_del_text(p)).replace(" ", "")
+        ),
+        None,
+    )
+    assert target_p is not None
+    n_del = len(target_p.findall(".//w:del", NS))
+    n_ins = len(target_p.findall(".//w:ins", NS))
+    plain = _collect_t_text(target_p).strip()
+    assert "women in the US" in plain
+    assert "[Ref." in plain
+    assert "Black women were more likely to be diagnosed" not in plain
+    assert n_del <= 8 and n_ins <= 10 and len(plain) > 60, (
+        "expected grouped inline revision, "
+        f"got del={n_del} ins={n_ins} plain_len={len(plain)}"
+    )
+    paras = body.findall("w:p", NS)
+    idx = paras.index(target_p)
+    assert idx + 1 < len(paras)
+    next_plain = _collect_t_text(paras[idx + 1]).strip()
+    assert next_plain.startswith("Black women were more likely to be diagnosed")
 
 
 def test_emit_preserves_w_p_pr(tmp_path: Path) -> None:

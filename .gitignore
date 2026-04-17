@@ -17,6 +17,7 @@ Thumbs.db
 __pycache__/
 *.egg-info/
 *.py[cod]
+.pytest_cache/
 tests/__pycache__root_old/
 
 
@@ -24,9 +25,18 @@ tests/__pycache__root_old/
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
+.cursor/debug-*.log
 
 # Local file testing (compare CLI / desktop output; entire directory untracked)
 tested_output/
 
 # Golden baseline refresh script output (.docx per pair)
 golden-corpus-output/
+
+# Local scratch / temp output
+tmp/
+tmp-*/
+
+# Local-only files not to push
+AGENTS.md
+.prettierrc
