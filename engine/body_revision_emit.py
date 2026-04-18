@@ -864,6 +864,7 @@ def _w_ins_segment_from_revised_paragraph_runs(
 # Table ``major_sentence_mode`` full-line replace uses a looser bar so unrelated
 # sentences still collapse to one ``w:del`` + one ``w:ins`` (SCRUM-131).
 _TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX = 0.35
+_INSERTED_TABLE_CELL_SHADE_FILL = "D9EAF7"
 
 
 def _word_token_similarity_ratio(a: str, b: str) -> float:
@@ -2655,6 +2656,22 @@ def _wrap_paragraph_non_ppr_children_with_ins(
     p_el.insert(insert_at, ins_el)
 
 
+def _ensure_inserted_table_cell_shading(tc_el: ET.Element) -> None:
+    """Apply Word-like light blue shading to structurally inserted table cells."""
+
+    tc_pr = tc_el.find("w:tcPr", NS)
+    if tc_pr is None:
+        tc_pr = ET.Element(f"{{{WORD_NAMESPACE}}}tcPr")
+        tc_el.insert(0, tc_pr)
+    shd = tc_pr.find("w:shd", NS)
+    if shd is None:
+        shd = ET.Element(f"{{{WORD_NAMESPACE}}}shd")
+        tc_pr.append(shd)
+    shd.set(f"{{{WORD_NAMESPACE}}}val", "clear")
+    shd.set(f"{{{WORD_NAMESPACE}}}color", "auto")
+    shd.set(f"{{{WORD_NAMESPACE}}}fill", _INSERTED_TABLE_CELL_SHADE_FILL)
+
+
 def _mark_table_content_as_inserted(
     tbl_el: ET.Element,
     *,
@@ -2664,6 +2681,8 @@ def _mark_table_content_as_inserted(
 ) -> None:
     """Revised-only table: keep ``w:tbl`` in-flow and mark paragraph content with ``w:ins``."""
 
+    for tc_el in tbl_el.findall(".//w:tc", NS):
+        _ensure_inserted_table_cell_shading(tc_el)
     for p_el in tbl_el.findall(".//w:p", NS):
         _wrap_paragraph_non_ppr_children_with_ins(
             p_el,
@@ -2890,6 +2909,8 @@ def _apply_matched_table_track_changes(
         # Row exists only in revised: insert cloned row at aligned position.
         if oi is None and ri is not None and ri < len(rev_tr_els):
             new_tr = copy.deepcopy(rev_tr_els[ri])
+            for tc_el in new_tr.findall("w:tc", NS):
+                _ensure_inserted_table_cell_shading(tc_el)
             if out_row < len(tr_els):
                 anchor_tr = tr_els[out_row]
                 tbl_el.insert(list(tbl_el).index(anchor_tr), new_tr)
@@ -2919,6 +2940,7 @@ def _apply_matched_table_track_changes(
             if cell_idx >= len(tcs):
                 if cell_idx < len(rev_tcs):
                     new_tc = copy.deepcopy(rev_tcs[cell_idx])
+                    _ensure_inserted_table_cell_shading(new_tc)
                     tr_el.append(new_tc)
                     tcs.append(new_tc)
                 else:
