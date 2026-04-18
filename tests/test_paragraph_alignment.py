@@ -1,4 +1,7 @@
+import pytest
+
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
+import engine.paragraph_alignment as paragraph_alignment
 from engine.paragraph_alignment import (
     ParagraphAlignment,
     align_paragraphs,
@@ -206,6 +209,57 @@ def test_alignment_near_index_word_jaccard_pairs_after_insert() -> None:
     assert (1, 2) in pairs, pairs
 
 
+def test_raw_max_char_tok_ratio_skips_expensive_char_ratio_for_large_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSequenceMatcher:
+        def __init__(self, _junk, a, b, autojunk=False):
+            self.a = a
+            self.b = b
+
+        def quick_ratio(self) -> float:
+            return 1.0
+
+        def ratio(self) -> float:
+            if isinstance(self.a, str) and isinstance(self.b, str):
+                raise AssertionError("raw string ratio() should be skipped for huge inputs")
+            return 1.0
+
+    monkeypatch.setattr(paragraph_alignment.difflib, "SequenceMatcher", FakeSequenceMatcher)
+    monkeypatch.setattr(paragraph_alignment, "_ALIGN_SKIP_CHAR_RATIO_MAX_CHARS", 10)
+    monkeypatch.setattr(paragraph_alignment, "_ALIGN_SKIP_CHAR_RATIO_MAX_PRODUCT", 100)
+
+    text = ("token " * 40).strip()
+    assert paragraph_alignment._raw_max_char_tok_ratio(text, text) == 1.0
+
+
+def test_alignment_large_paragraphs_uses_token_ratio_when_char_ratio_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSequenceMatcher:
+        def __init__(self, _junk, a, b, autojunk=False):
+            self.a = a
+            self.b = b
+
+        def quick_ratio(self) -> float:
+            return 0.95
+
+        def ratio(self) -> float:
+            if isinstance(self.a, str) and isinstance(self.b, str):
+                raise AssertionError("raw string ratio() should be skipped for huge inputs")
+            return 1.0
+
+    monkeypatch.setattr(paragraph_alignment.difflib, "SequenceMatcher", FakeSequenceMatcher)
+    monkeypatch.setattr(paragraph_alignment, "_ALIGN_SKIP_CHAR_RATIO_MAX_CHARS", 10)
+    monkeypatch.setattr(paragraph_alignment, "_ALIGN_SKIP_CHAR_RATIO_MAX_PRODUCT", 100)
+
+    original = {"version": 1, "blocks": [_p(("token " * 400).strip() + " old")]}
+    revised = {"version": 1, "blocks": [_p(("token " * 400).strip() + " new")]}
+
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert alignment == [ParagraphAlignment(0, 0)]
+
+
 def test_repair_unmatched_rev_expansion_override_merges_false_delete_insert() -> None:
     """Post-LCS repair pairs (o,None)+(None,r) when rank, gates, and containment allow."""
 
@@ -361,4 +415,3 @@ def test_repair_scrum121_merges_orig_only_then_rev_split_paragraphs() -> None:
         ParagraphAlignment(1, 1, revised_merge_end_exclusive=3),
         ParagraphAlignment(2, 3),
     ]
-

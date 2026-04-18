@@ -113,6 +113,13 @@ _ALIGN_LENGTH_BYPASS_JACCARD_WORD_RATIO = 0.28
 _ALIGN_LENGTH_BYPASS_PREFIX_MIN_CHARS = 36
 _MAX_INDEX_SKEW_FOR_LENGTH_BYPASS_PREFIX = 6
 
+# Full ``SequenceMatcher.ratio()`` on very large paragraph strings is quadratic
+# and can dominate golden-corpus runtime on the large IB protocols. Keep the
+# existing cheap gates, but for oversized paragraphs rely on token similarity
+# instead of raw character ratio.
+_ALIGN_SKIP_CHAR_RATIO_MAX_CHARS = 1400
+_ALIGN_SKIP_CHAR_RATIO_MAX_PRODUCT = 1_200_000
+
 # Post-LCS repair: reclaim ``(o, None)`` + ``(None, r)`` when expansion is obvious (see
 # :func:`_repair_alignment_unmatched_rev_expansion_override`).
 _ALIGNMENT_OVERRIDE_RANK_SIM_MIN = 0.85
@@ -422,6 +429,17 @@ def _length_weak_prefix_expansion_match(o_txt: str, r_txt: str) -> bool:
     return longer.startswith(shorter)
 
 
+def _should_skip_expensive_char_ratio(lo: int, lr: int) -> bool:
+    """True when raw character ``ratio()`` is too expensive to justify."""
+
+    return (
+        lo > 0
+        and lr > 0
+        and max(lo, lr) >= _ALIGN_SKIP_CHAR_RATIO_MAX_CHARS
+        and lo * lr >= _ALIGN_SKIP_CHAR_RATIO_MAX_PRODUCT
+    )
+
+
 def _containment_hint_string(o_txt: str, r_txt: str) -> str:
     """
     Same heuristic labels as stderr token overlap debug (single string per pair).
@@ -437,8 +455,10 @@ def _containment_hint_string(o_txt: str, r_txt: str) -> str:
     set_o, set_r = set(co), set(cr)
     tot_o, tot_r = len(norm_o), len(norm_r)
     ratio_o = shared_occ / tot_o if tot_o else 0.0
-    sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
-    char_r = sm.ratio()
+    char_r = 0.0
+    if not _should_skip_expensive_char_ratio(len(o_txt), len(r_txt)):
+        sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
+        char_r = sm.ratio()
     ot = norm_keys(tokenize_for_lcs(o_txt))
     rt = norm_keys(tokenize_for_lcs(r_txt))
     tok_r = difflib.SequenceMatcher(None, ot, rt, autojunk=False).ratio()
@@ -904,11 +924,12 @@ def _blocks_align_in_lcs(
     ):
         cache[key] = True
         return True
-    char_r = sm.ratio()
+    skip_char_ratio = _should_skip_expensive_char_ratio(lo, lr)
+    char_r = 0.0 if skip_char_ratio else sm.ratio()
     ot = norm_keys(tokenize_for_lcs(o_txt))
     rt = norm_keys(tokenize_for_lcs(r_txt))
     tok_r = difflib.SequenceMatcher(None, ot, rt, autojunk=False).ratio()
-    combined = max(char_r, tok_r)
+    combined = tok_r if skip_char_ratio else max(char_r, tok_r)
     if q >= _ALIGN_FUZZY_QUICK_MIN and combined >= _ALIGN_FUZZY_COMBINED_MIN:
         ok = True
     elif (
@@ -1046,11 +1067,12 @@ def _align_score_blocks_pair_detail(
     ):
         lines.append("  gate: length_weak_prefix_expansion → MATCH")
         return True, lines
-    char_r = sm.ratio()
+    skip_char_ratio = _should_skip_expensive_char_ratio(lo, lr)
+    char_r = 0.0 if skip_char_ratio else sm.ratio()
     ot = norm_keys(tokenize_for_lcs(o_txt))
     rt = norm_keys(tokenize_for_lcs(r_txt))
     tok_r = difflib.SequenceMatcher(None, ot, rt, autojunk=False).ratio()
-    combined = max(char_r, tok_r)
+    combined = tok_r if skip_char_ratio else max(char_r, tok_r)
     lines.append(
         f"  fuzzy: quick_ratio={q:.4f} (strict min {_ALIGN_FUZZY_QUICK_MIN}, soft min {_ALIGN_FUZZY_QUICK_SOFT_MIN}) "
         f"char_ratio={char_r:.4f} tok_ratio={tok_r:.4f} combined_max={combined:.4f} "
@@ -1651,11 +1673,13 @@ def _raw_max_char_tok_ratio(o_txt: str, r_txt: str) -> float:
 
     if not o_txt and not r_txt:
         return 1.0
-    sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
-    char_r = sm.ratio()
     ot = norm_keys(tokenize_for_lcs(o_txt))
     rt = norm_keys(tokenize_for_lcs(r_txt))
     tok_r = difflib.SequenceMatcher(None, ot, rt, autojunk=False).ratio()
+    if _should_skip_expensive_char_ratio(len(o_txt), len(r_txt)):
+        return float(tok_r)
+    sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
+    char_r = sm.ratio()
     return float(max(char_r, tok_r))
 
 
@@ -1886,4 +1910,3 @@ def align_paragraphs(original: BodyIR, revised: BodyIR, config: CompareConfig) -
         original, revised, config, collect_lcs_trace=False
     )
     return alignment
-
