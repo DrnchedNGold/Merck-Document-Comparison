@@ -1065,6 +1065,7 @@ def test_emit_table_row_addition_keeps_table_and_marks_new_row_inserted(
     assert len(rows[0].findall("w:tc", NS)) == 2
     assert len(rows[1].findall("w:tc", NS)) == 2
     assert rows[1].findall(".//w:ins", NS)
+    assert all(tc.find("w:tcPr/w:shd", NS) is not None for tc in rows[1].findall("w:tc", NS))
     body = root.find(".//w:body", NS)
     assert body is not None
     assert not any(
@@ -1104,10 +1105,47 @@ def test_emit_table_middle_row_insert_does_not_replace_following_row(
     assert len(rows) == 4
     assert all(len(r.findall("w:tc", NS)) == 2 for r in rows)
     assert "B" in _collect_t_text(rows[2]) and rows[2].find(".//w:ins", NS) is not None
+    assert all(tc.find("w:tcPr/w:shd", NS) is not None for tc in rows[2].findall("w:tc", NS))
     # Following row should remain unchanged (no revisions inside "C/Charlie" row).
     assert "CCharlie" in _collect_t_text(rows[3]).replace(" ", "")
     assert rows[3].find(".//w:ins", NS) is None
     assert rows[3].find(".//w:del", NS) is None
+    assert all(tc.find("w:tcPr/w:shd", NS) is None for tc in rows[3].findall("w:tc", NS))
+
+
+def test_emit_table_text_edit_cell_does_not_get_shading(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-133: text-only edits in existing cells should not trigger tc shading."""
+
+    orig_tbl = """
+<w:tbl>
+  <w:tr>
+    <w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>Alpha</w:t></w:r></w:p></w:tc>
+  </w:tr>
+</w:tbl>
+"""
+    rev_tbl = """
+<w:tbl>
+  <w:tr>
+    <w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>Alpha revised</w:t></w:r></w:p></w:tc>
+  </w:tr>
+</w:tbl>
+"""
+    orig = _minimal_docx(tmp_path, orig_tbl, "orig_cell_edit.docx")
+    rev = _minimal_docx(tmp_path, rev_tbl, "rev_cell_edit.docx")
+    out = tmp_path / "out_cell_edit.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+
+    root = load_word_document_xml_root(out)
+    row = root.find(".//w:tbl/w:tr", NS)
+    assert row is not None
+    cells = row.findall("w:tc", NS)
+    assert len(cells) == 2
+    assert cells[1].find(".//w:ins", NS) is not None
+    assert cells[1].find("w:tcPr/w:shd", NS) is None
 
 
 def test_emit_table_cell_major_sentence_replace_emits_full_del_and_full_ins(
