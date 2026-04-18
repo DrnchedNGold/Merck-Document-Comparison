@@ -119,6 +119,7 @@ _MAX_INDEX_SKEW_FOR_LENGTH_BYPASS_PREFIX = 6
 # instead of raw character ratio.
 _ALIGN_SKIP_CHAR_RATIO_MAX_CHARS = 1400
 _ALIGN_SKIP_CHAR_RATIO_MAX_PRODUCT = 1_200_000
+_ALIGN_SKIP_CHAR_RATIO_MIN_BODY_BLOCKS = 1000
 
 # Post-LCS repair: reclaim ``(o, None)`` + ``(None, r)`` when expansion is obvious (see
 # :func:`_repair_alignment_unmatched_rev_expansion_override`).
@@ -429,12 +430,15 @@ def _length_weak_prefix_expansion_match(o_txt: str, r_txt: str) -> bool:
     return longer.startswith(shorter)
 
 
-def _should_skip_expensive_char_ratio(lo: int, lr: int) -> bool:
+def _should_skip_expensive_char_ratio(
+    lo: int, lr: int, *, body_block_count: int | None = None
+) -> bool:
     """True when raw character ``ratio()`` is too expensive to justify."""
 
     return (
         lo > 0
         and lr > 0
+        and (body_block_count is None or body_block_count >= _ALIGN_SKIP_CHAR_RATIO_MIN_BODY_BLOCKS)
         and max(lo, lr) >= _ALIGN_SKIP_CHAR_RATIO_MAX_CHARS
         and lo * lr >= _ALIGN_SKIP_CHAR_RATIO_MAX_PRODUCT
     )
@@ -924,7 +928,9 @@ def _blocks_align_in_lcs(
     ):
         cache[key] = True
         return True
-    skip_char_ratio = _should_skip_expensive_char_ratio(lo, lr)
+    skip_char_ratio = _should_skip_expensive_char_ratio(
+        lo, lr, body_block_count=max(m, n)
+    )
     char_r = 0.0 if skip_char_ratio else sm.ratio()
     ot = norm_keys(tokenize_for_lcs(o_txt))
     rt = norm_keys(tokenize_for_lcs(r_txt))
@@ -1067,7 +1073,9 @@ def _align_score_blocks_pair_detail(
     ):
         lines.append("  gate: length_weak_prefix_expansion → MATCH")
         return True, lines
-    skip_char_ratio = _should_skip_expensive_char_ratio(lo, lr)
+    skip_char_ratio = _should_skip_expensive_char_ratio(
+        lo, lr, body_block_count=max(m, n)
+    )
     char_r = 0.0 if skip_char_ratio else sm.ratio()
     ot = norm_keys(tokenize_for_lcs(o_txt))
     rt = norm_keys(tokenize_for_lcs(r_txt))
@@ -1668,7 +1676,9 @@ def alignment_for_track_changes_emit(
     return al
 
 
-def _raw_max_char_tok_ratio(o_txt: str, r_txt: str) -> float:
+def _raw_max_char_tok_ratio(
+    o_txt: str, r_txt: str, *, body_block_count: int | None = None
+) -> float:
     """``max(char_ratio, tok_ratio)`` for two normalized block texts (no type check)."""
 
     if not o_txt and not r_txt:
@@ -1676,7 +1686,9 @@ def _raw_max_char_tok_ratio(o_txt: str, r_txt: str) -> float:
     ot = norm_keys(tokenize_for_lcs(o_txt))
     rt = norm_keys(tokenize_for_lcs(r_txt))
     tok_r = difflib.SequenceMatcher(None, ot, rt, autojunk=False).ratio()
-    if _should_skip_expensive_char_ratio(len(o_txt), len(r_txt)):
+    if _should_skip_expensive_char_ratio(
+        len(o_txt), len(r_txt), body_block_count=body_block_count
+    ):
         return float(tok_r)
     sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
     char_r = sm.ratio()
@@ -1696,7 +1708,9 @@ def _pair_rank_similarity(
     if orig_blocks[oi].get("type") != rev_blocks[rj].get("type"):
         return float("-inf")
     o_txt, r_txt = o_txts[oi], r_txts[rj]
-    return _raw_max_char_tok_ratio(o_txt, r_txt)
+    return _raw_max_char_tok_ratio(
+        o_txt, r_txt, body_block_count=max(len(orig_blocks), len(rev_blocks))
+    )
 
 
 def _pair_rank_similarity_best_candidate(
@@ -1714,7 +1728,9 @@ def _pair_rank_similarity_best_candidate(
     """
 
     o_txt, r_txt = o_txts[oi], r_txts[rj]
-    base = _raw_max_char_tok_ratio(o_txt, r_txt)
+    base = _raw_max_char_tok_ratio(
+        o_txt, r_txt, body_block_count=max(len(orig_blocks), len(rev_blocks))
+    )
     if orig_blocks[oi].get("type") == rev_blocks[rj].get("type"):
         return base
     return base * _BEST_CANDIDATE_CROSS_TYPE_RANK_PENALTY

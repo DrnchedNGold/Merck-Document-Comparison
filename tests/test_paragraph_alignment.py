@@ -260,6 +260,31 @@ def test_alignment_large_paragraphs_uses_token_ratio_when_char_ratio_is_skipped(
     assert alignment == [ParagraphAlignment(0, 0)]
 
 
+def test_raw_max_char_tok_ratio_keeps_char_ratio_for_small_body_even_if_text_is_long(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSequenceMatcher:
+        def __init__(self, _junk, a, b, autojunk=False):
+            self.a = a
+            self.b = b
+
+        def quick_ratio(self) -> float:
+            return 1.0
+
+        def ratio(self) -> float:
+            if isinstance(self.a, str) and isinstance(self.b, str):
+                return 0.6
+            return 1.0
+
+    monkeypatch.setattr(paragraph_alignment.difflib, "SequenceMatcher", FakeSequenceMatcher)
+    monkeypatch.setattr(paragraph_alignment, "_ALIGN_SKIP_CHAR_RATIO_MAX_CHARS", 10)
+    monkeypatch.setattr(paragraph_alignment, "_ALIGN_SKIP_CHAR_RATIO_MAX_PRODUCT", 100)
+    monkeypatch.setattr(paragraph_alignment, "_ALIGN_SKIP_CHAR_RATIO_MIN_BODY_BLOCKS", 1000)
+
+    text = ("token " * 40).strip()
+    assert paragraph_alignment._raw_max_char_tok_ratio(text, text, body_block_count=200) == 1.0
+
+
 def test_repair_unmatched_rev_expansion_override_merges_false_delete_insert() -> None:
     """Post-LCS repair pairs (o,None)+(None,r) when rank, gates, and containment allow."""
 
