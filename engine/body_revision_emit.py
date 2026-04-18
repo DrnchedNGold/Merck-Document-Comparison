@@ -693,7 +693,8 @@ def _new_w_p_toc_insert_from_revised_source(
             p_out.append(copy.deepcopy(ch))
         else:
             ins_el.append(copy.deepcopy(ch))
-    p_out.append(ins_el)
+    if len(ins_el):
+        p_out.append(ins_el)
     return p_out
 
 
@@ -737,6 +738,25 @@ def _paragraph_needs_revision(orig: BodyParagraph, rev: BodyParagraph, config: C
     o = _concat_paragraph_text(orig, config)
     r = _concat_paragraph_text(rev, config)
     return _token_level_text_differs(o, r)
+
+
+def _revised_only_paragraph_should_emit(
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+    *,
+    revised_p_el: ET.Element | None,
+) -> bool:
+    """
+    Emit revised-only paragraphs even when they are textually blank.
+
+    Blank body paragraphs carry real document structure in Word, especially in
+    front matter around title blocks, tables, and TOC boundaries. Treating
+    ``empty -> empty`` as "no revision" collapses those separators.
+    """
+
+    if _paragraph_needs_revision(_empty_body_paragraph(), rev_para, config):
+        return True
+    return revised_p_el is not None and len(rev_para.get("runs", [])) == 0
 
 
 def _next_id(counter: list[int]) -> str:
@@ -817,6 +837,27 @@ def _w_ins_segment(text: str, ins_id: str, author: str, date_iso: str) -> ET.Ele
     )
     for run in _w_runs_for_plain_text(text):
         ins_el.append(run)
+    return ins_el
+
+
+def _w_ins_segment_from_revised_paragraph_runs(
+    rev_p: ET.Element,
+    ins_id: str,
+    author: str,
+    date_iso: str,
+) -> ET.Element:
+    """Inserted paragraph content preserving revised run formatting."""
+
+    ins_el = ET.Element(
+        f"{{{WORD_NAMESPACE}}}ins",
+        {
+            f"{{{WORD_NAMESPACE}}}id": ins_id,
+            f"{{{WORD_NAMESPACE}}}author": author,
+            f"{{{WORD_NAMESPACE}}}date": date_iso,
+        },
+    )
+    for run in _paragraph_w_runs_in_document_order(rev_p):
+        ins_el.append(copy.deepcopy(run))
     return ins_el
 
 
@@ -3131,8 +3172,6 @@ def _apply_track_changes_to_structural_container(
             if rblock.get("type") != "paragraph":
                 continue
             rev_para = rblock  # type: ignore[assignment]
-            if not _paragraph_needs_revision(empty_rev, rev_para, config):
-                continue
             rev_el: ET.Element | None = None
             if (
                 revised_block_elements is not None
@@ -3140,6 +3179,12 @@ def _apply_track_changes_to_structural_container(
                 and _local_name(revised_block_elements[rj].tag) == "p"
             ):
                 rev_el = revised_block_elements[rj]
+            if not _revised_only_paragraph_should_emit(
+                rev_para,
+                config,
+                revised_p_el=rev_el,
+            ):
+                continue
             if rev_el is not None and _paragraph_style_is_toc(rev_el):
                 new_p = _new_w_p_toc_insert_from_revised_source(
                     rev_el,
@@ -3154,6 +3199,7 @@ def _apply_track_changes_to_structural_container(
                     id_counter=id_counter,
                     author=author,
                     date_iso=date_iso,
+                    revised_p_el=rev_el,
                 )
             if rev_el is not None:
                 _copy_revised_p_pr_to_inserted_paragraph(new_p, rev_el)
@@ -3425,8 +3471,22 @@ def _new_w_p_from_full_paragraph_insert(
     id_counter: list[int],
     author: str,
     date_iso: str,
+    revised_p_el: ET.Element | None = None,
 ) -> ET.Element:
     """A ``w:p`` whose content is Track Changes for text that exists only in the revised document."""
+    p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
+    if revised_p_el is not None:
+        runs = _paragraph_w_runs_in_document_order(revised_p_el)
+        if runs:
+            p_el.append(
+                _w_ins_segment_from_revised_paragraph_runs(
+                    revised_p_el,
+                    _next_id(id_counter),
+                    author,
+                    date_iso,
+                )
+            )
+            return p_el
     kids = build_paragraph_track_change_elements(
         _empty_body_paragraph(),
         rev_para,
@@ -3435,7 +3495,6 @@ def _new_w_p_from_full_paragraph_insert(
         author=author,
         date_iso=date_iso,
     )
-    p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
     for node in kids:
         p_el.append(node)
     return p_el

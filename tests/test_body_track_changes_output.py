@@ -47,6 +47,19 @@ def _collect_del_text(container: ET.Element) -> str:
     return "".join(parts)
 
 
+def _body_block_sequence(body: ET.Element) -> list[tuple[str, str]]:
+    seq: list[tuple[str, str]] = []
+    for ch in list(body):
+        ln = _local_name(ch.tag)
+        if ln == "p":
+            seq.append(("p", (_collect_t_text(ch) + _collect_del_text(ch)).strip()))
+        elif ln == "tbl":
+            seq.append(("tbl", ""))
+        elif ln == "ins" and ch.find("w:tbl", NS) is not None:
+            seq.append(("tbl", ""))
+    return seq
+
+
 def test_build_paragraph_track_change_insert_has_ins_with_t() -> None:
     orig = _paragraph_block("Hello")
     rev = _paragraph_block("Hello world")
@@ -1367,6 +1380,145 @@ def test_scrum121_cervical_disparities_inline_track_changes_not_full_paragraph_d
     assert idx + 1 < len(paras)
     next_plain = _collect_t_text(paras[idx + 1]).strip()
     assert next_plain.startswith("Black women were more likely to be diagnosed")
+
+
+def test_scrum127_cervical_page1_front_matter_preserves_blank_block_structure(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-127: revised-only blank paragraphs on page 1 should not be dropped."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum127_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    seq = _body_block_sequence(body)
+    assert seq[0] == ("p", "SPONSOR’S NAME:Merck Sharp & Dohme LLC")
+    assert seq[1] == ("p", "Rahway, NJ, USA (MSD)")
+    assert seq[2] == ("p", "")
+    assert seq[3][0] == "p"
+    assert seq[3][1].startswith("Product number and indication:MK-2870")
+    assert "cervical cancer" in seq[3][1]
+    assert seq[4] == ("p", "Studies included in this Diversity Plan:")
+    assert seq[5] == ("tbl", "")
+    assert seq[6] == ("p", "")
+    assert seq[7] == ("p", "DIVERSITY PLAN")
+    assert seq[8] == ("p", "")
+    assert seq[9] == ("p", "Version Number:2")
+    assert seq[10] == ("p", "Release Date:26-JUN-2025")
+    assert seq[11] == ("p", "")
+    assert seq[12] == ("p", "")
+
+
+def test_scrum127_cervical_diversity_plan_insert_preserves_run_formatting(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-127: revised-only front-matter title keeps bold/size on inserted run."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum127_cervical_diversity_plan_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    target_p = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if _collect_t_text(p).strip() == "DIVERSITY PLAN"
+        ),
+        None,
+    )
+    assert target_p is not None
+    ins = target_p.find("w:ins", NS)
+    assert ins is not None
+    run = ins.find("w:r", NS)
+    assert run is not None
+    rpr = run.find("w:rPr", NS)
+    assert rpr is not None
+    assert rpr.find("w:b", NS) is not None
+    sz = rpr.find("w:sz", NS)
+    assert sz is not None and sz.get(f"{{{WORD_NS}}}val") == "36"
+
+
+def test_revised_only_full_paragraph_insert_preserves_run_rpr(tmp_path: Path) -> None:
+    """Revised-only paragraph inserts should keep source run formatting inside ``w:ins``."""
+
+    orig = _minimal_docx(tmp_path, "", "scrum127_orig_empty.docx")
+    rev_inner = """
+<w:p>
+  <w:pPr><w:jc w:val="center"/></w:pPr>
+  <w:r>
+    <w:rPr><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/></w:rPr>
+    <w:t>DIVERSITY PLAN</w:t>
+  </w:r>
+</w:p>
+"""
+    rev = _minimal_docx(tmp_path, rev_inner, "scrum127_rev_formatted.docx")
+    out = tmp_path / "scrum127_out_formatted.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    p = root.find(".//w:body/w:p", NS)
+    assert p is not None
+    ins = p.find("w:ins", NS)
+    assert ins is not None
+    run = ins.find("w:r", NS)
+    assert run is not None
+    rpr = run.find("w:rPr", NS)
+    assert rpr is not None
+    assert rpr.find("w:b", NS) is not None
+    sz = rpr.find("w:sz", NS)
+    assert sz is not None and sz.get(f"{{{WORD_NS}}}val") == "36"
+
+
+def test_revised_only_blank_toc_paragraph_preserves_structure_without_empty_insert(
+    tmp_path: Path,
+) -> None:
+    """Blank TOC/sectPr paragraphs should not add an empty ``w:ins`` node."""
+
+    orig = _minimal_docx(tmp_path, "", "scrum127_orig_empty_toc.docx")
+    rev_inner = """
+<w:p>
+  <w:pPr>
+    <w:pStyle w:val="TOCTitle"/>
+    <w:sectPr>
+      <w:pgSz w:w="12240" w:h="15840"/>
+    </w:sectPr>
+  </w:pPr>
+</w:p>
+"""
+    rev = _minimal_docx(tmp_path, rev_inner, "scrum127_rev_blank_toc.docx")
+    out = tmp_path / "scrum127_out_blank_toc.docx"
+    emit_docx_with_body_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    root = load_word_document_xml_root(out)
+    p = root.find(".//w:body/w:p", NS)
+    assert p is not None
+    assert p.find("w:pPr/w:pStyle", NS) is not None
+    assert p.find("w:pPr/w:sectPr", NS) is not None
+    assert p.find("w:ins", NS) is None
 
 
 def test_emit_preserves_w_p_pr(tmp_path: Path) -> None:
