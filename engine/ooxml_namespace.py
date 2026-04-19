@@ -93,6 +93,21 @@ def _augment_root_open_tag_for_inner_prefixes(
     return root_open_tag[:-1] + "".join(extras) + ">"
 
 
+def _merge_missing_xmlns_declarations(root_open_tag: str, donor_open_tag: str) -> str:
+    """Copy any missing ``xmlns:*`` bindings from *donor_open_tag* onto *root_open_tag*."""
+
+    declared = _prefixes_declared_on_open_tag(root_open_tag)
+    extras: list[str] = []
+    for mm in _XMLNS_RE.finditer(donor_open_tag):
+        prefix = mm.group(1)
+        if prefix not in declared:
+            extras.append(f' xmlns:{prefix}="{mm.group(2)}"')
+            declared.add(prefix)
+    if not extras or not root_open_tag.endswith(">"):
+        return root_open_tag
+    return root_open_tag[:-1] + "".join(extras) + ">"
+
+
 def serialize_ooxml_part(root: ET.Element, original_raw_xml: bytes) -> bytes:
     """
     Serialize ``root`` with UTF-8 and a Word-style XML declaration.
@@ -116,8 +131,9 @@ def serialize_ooxml_part(root: ET.Element, original_raw_xml: bytes) -> bytes:
 
     decl = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
     if m_orig:
-        root_open = _augment_root_open_tag_for_inner_prefixes(
-            m_orig.group(1), inner, prefix_to_uri
-        )
+        root_open = m_orig.group(1)
+        if m_ser:
+            root_open = _merge_missing_xmlns_declarations(root_open, m_ser.group(1))
+        root_open = _augment_root_open_tag_for_inner_prefixes(root_open, inner, prefix_to_uri)
         return decl + root_open.encode("utf-8") + inner.encode("utf-8")
     return decl + ser.encode("utf-8")

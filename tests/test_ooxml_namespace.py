@@ -23,3 +23,26 @@ def test_serialize_preserves_w14_prefix_not_ns0() -> None:
     assert "w14:paraId=" in out
     assert "xmlns:ns" not in out.split("<w:body", 1)[0]
     assert "mc:Ignorable=" in out or "Ignorable=" in out
+
+
+def test_serialize_keeps_extra_serialized_xmlns_bindings_when_reusing_original_root() -> None:
+    original = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="{WORD_NS}" xmlns:mc="{MC_NS}" mc:Ignorable="w14">
+  <w:p><w:r><w:t>Foot</w:t></w:r></w:p>
+</w:ftr>
+"""
+    root = ET.fromstring(original.encode("utf-8"))
+    drawing_uri = "http://example.com/drawing"
+    pic_uri = "http://example.com/picture"
+    p = root.find(f".//{{{WORD_NS}}}p")
+    assert p is not None
+    p.set("{http://schemas.microsoft.com/office/word/2010/wordml}paraId", "12345678")
+    r = ET.SubElement(p, f"{{{WORD_NS}}}r")
+    drawing = ET.SubElement(r, f"{{{drawing_uri}}}graphic")
+    ET.SubElement(drawing, f"{{{pic_uri}}}pic")
+
+    out = serialize_ooxml_part(root, original.encode("utf-8")).decode("utf-8")
+    assert "xmlns:w14=" in out
+    assert "w14:paraId=" in out
+    assert "xmlns:ns" in out.split("\n", 1)[1].split(">", 1)[0]
+    ET.fromstring(out.encode("utf-8"))
