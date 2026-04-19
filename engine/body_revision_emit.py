@@ -584,8 +584,8 @@ def _post_merge_paragraph_intro_then_list_like_full_deletes(container: ET.Elemen
         if intro_del is None:
             idx += 1
             continue
+        group: list[ET.Element] = [el]
         j = idx + 1
-        merged_followers = False
         while j < len(container):
             nxt = container[j]
             if _local_name(nxt.tag) != "p":
@@ -595,15 +595,19 @@ def _post_merge_paragraph_intro_then_list_like_full_deletes(container: ET.Elemen
             n_sid = _p_paragraph_style_id(nxt)
             if not _style_ok_after_paragraph_intro_for_list_merge(n_sid):
                 break
-            other_del = nxt.find("w:del", NS)
-            if other_del is None:
-                break
-            _append_br_run_to_del(intro_del)
-            for ch in list(other_del):
-                intro_del.append(copy.deepcopy(ch))
-            container.remove(nxt)
-            merged_followers = True
-        if merged_followers:
+            group.append(nxt)
+            j += 1
+        if len(group) >= 2 and not _post_merge_deleted_list_group_followed_by_insert(
+            container, idx, len(group)
+        ):
+            for p in group[1:]:
+                other_del = p.find("w:del", NS)
+                if other_del is None:
+                    continue
+                _append_br_run_to_del(intro_del)
+                for ch in list(other_del):
+                    intro_del.append(copy.deepcopy(ch))
+                container.remove(p)
             _coalesce_w_del_runs_to_single_del_text(intro_del)
             _strip_list_layout_from_merged_consolidated_delete_paragraph(el)
         idx += 1
@@ -636,15 +640,80 @@ def _post_merge_consecutive_same_list_like_full_deletes(container: ET.Element) -
                 break
             group.append(nxt)
             j += 1
-        if len(group) >= 2:
+        if len(group) >= 2 and not _post_merge_deleted_list_group_followed_by_insert(
+            container, idx, len(group)
+        ):
             _merge_w_del_paragraph_group_into_first(container, group)
         idx += 1
+
+
+def _paragraph_is_insert_only(p_el: ET.Element) -> bool:
+    """True when a ``w:p`` contains optional ``w:pPr`` plus exactly one ``w:ins``."""
+
+    non_ppr = [c for c in p_el if _local_name(c.tag) != "pPr"]
+    return len(non_ppr) == 1 and _local_name(non_ppr[0].tag) == "ins"
+
+
+def _post_merge_deleted_list_group_followed_by_insert(container: ET.Element, idx: int, group_len: int) -> bool:
+    """
+    Do not consolidate deleted list/introduction paragraphs when the next block is
+    an inserted replacement paragraph.
+
+    Word keeps those deleted lines as separate paragraphs in sponsor compare output
+    for the cervical abbreviations section; merging them changes pagination.
+    """
+
+    next_idx = idx + group_len
+    if next_idx >= len(container):
+        return False
+    nxt = container[next_idx]
+    return _local_name(nxt.tag) == "p" and _paragraph_is_insert_only(nxt)
 
 
 def _post_merge_consolidated_list_full_paragraph_deletes(container: ET.Element) -> None:
     """Post-pass: consolidate adjacent deleted list rows into fewer ``w:del`` blocks (SCRUM-130)."""
     _post_merge_paragraph_intro_then_list_like_full_deletes(container)
     _post_merge_consecutive_same_list_like_full_deletes(container)
+
+
+def _sync_blank_paragraph_structure_to_revised(orig_p: ET.Element, rev_p: ET.Element) -> bool:
+    """
+    For matched textually blank paragraphs, copy revised non-text structure.
+
+    This preserves authored page-break paragraphs and spacing-only blanks that do
+    not show up in the token diff because both sides have empty paragraph text.
+    """
+
+    if _paragraph_plain_text(orig_p) or _paragraph_plain_text(rev_p):
+        return False
+    changed = False
+
+    orig_ppr = orig_p.find("w:pPr", NS)
+    rev_ppr = rev_p.find("w:pPr", NS)
+    if rev_ppr is not None:
+        if orig_ppr is None or ET.tostring(orig_ppr, encoding="unicode") != ET.tostring(
+            rev_ppr, encoding="unicode"
+        ):
+            if orig_ppr is not None:
+                orig_p.remove(orig_ppr)
+            orig_p.insert(0, copy.deepcopy(rev_ppr))
+            changed = True
+    elif orig_ppr is not None:
+        orig_p.remove(orig_ppr)
+        changed = True
+
+    orig_non_ppr = [copy.deepcopy(ch) for ch in orig_p if _local_name(ch.tag) != "pPr"]
+    rev_non_ppr = [copy.deepcopy(ch) for ch in rev_p if _local_name(ch.tag) != "pPr"]
+    if [ET.tostring(ch, encoding="unicode") for ch in orig_non_ppr] != [
+        ET.tostring(ch, encoding="unicode") for ch in rev_non_ppr
+    ]:
+        for ch in list(orig_p):
+            if _local_name(ch.tag) != "pPr":
+                orig_p.remove(ch)
+        for ch in rev_non_ppr:
+            orig_p.append(ch)
+        changed = True
+    return changed
 
 
 def _runs_convert_w_t_to_del_text(root: ET.Element) -> None:
@@ -2763,6 +2832,35 @@ def _ensure_page_break_before_from_revised(orig_p: ET.Element, rev_p: ET.Element
     return True
 
 
+def _sync_page_break_before_to_revised(orig_p: ET.Element, rev_p: ET.Element) -> bool:
+    """
+    Make ``orig_p`` page-break-before parity match ``rev_p``.
+
+    Preserve all other paragraph properties; only add/remove ``w:pageBreakBefore``
+    so matched paragraphs don't keep legacy pagination that was removed in the
+    revised document.
+    """
+
+    rev_has_pb = _paragraph_has_page_break_before(rev_p)
+    ppr = orig_p.find("w:pPr", NS)
+    if rev_has_pb:
+        if ppr is None:
+            ppr = ET.Element(f"{{{WORD_NAMESPACE}}}pPr")
+            orig_p.insert(0, ppr)
+        if ppr.find("w:pageBreakBefore", NS) is None:
+            ppr.append(ET.Element(f"{{{WORD_NAMESPACE}}}pageBreakBefore"))
+            return True
+        return False
+
+    if ppr is None:
+        return False
+    pb = ppr.find("w:pageBreakBefore", NS)
+    if pb is None:
+        return False
+    ppr.remove(pb)
+    return True
+
+
 def _copy_revised_p_pr_to_inserted_paragraph(new_p: ET.Element, rev_p: ET.Element) -> None:
     """Preserve revised paragraph layout (including page breaks) on revised-only inserts."""
 
@@ -2777,43 +2875,6 @@ def _copy_revised_p_pr_to_inserted_paragraph(new_p: ET.Element, rev_p: ET.Elemen
 
 def _paragraph_plain_text(p_el: ET.Element) -> str:
     return "".join((t.text or "") for t in p_el.findall(".//w:t", NS))
-
-
-def _ensure_page_break_before_toc_heading_after_first_table(container: ET.Element) -> bool:
-    """
-    Word-compare parity (SCRUM-130 pagination): when the first study table remains
-    in front matter, TOC heading should begin on the next page.
-    """
-
-    children = list(container)
-    first_table_idx: int | None = None
-    for i, ch in enumerate(children):
-        ln = _local_name(ch.tag)
-        if ln == "tbl" or (ln == "ins" and ch.find("w:tbl", NS) is not None):
-            first_table_idx = i
-            break
-    if first_table_idx is None:
-        return False
-
-    for ch in children[first_table_idx + 1 :]:
-        if _local_name(ch.tag) != "p":
-            continue
-        txt_raw = _paragraph_plain_text(ch).strip()
-        txt = txt_raw.upper()
-        sid = _p_paragraph_style_id(ch)
-        is_toc_heading = txt == "TABLE OF CONTENTS"
-        is_toc_first_line = txt.startswith("TABLE OF CONTENTS") and sid == "TOC1"
-        if not (is_toc_heading or is_toc_first_line):
-            continue
-        ppr = ch.find("w:pPr", NS)
-        if ppr is None:
-            ppr = ET.Element(f"{{{WORD_NAMESPACE}}}pPr")
-            ch.insert(0, ppr)
-        if ppr.find("w:pageBreakBefore", NS) is not None:
-            return False
-        ppr.append(ET.Element(f"{{{WORD_NAMESPACE}}}pageBreakBefore"))
-        return True
-    return False
 
 
 def _relocate_legacy_toc_title_before_first_table_to_toc_section(
@@ -2885,11 +2946,138 @@ def _relocate_legacy_toc_title_before_first_table_to_toc_section(
         jc = ET.Element(f"{{{WORD_NAMESPACE}}}jc")
         ppr.append(jc)
     jc.set(f"{{{WORD_NAMESPACE}}}val", "center")
-    if ppr.find("w:pageBreakBefore", NS) is None:
-        ppr.append(ET.Element(f"{{{WORD_NAMESPACE}}}pageBreakBefore"))
-
     container.insert(insert_idx, legacy_heading)
     return True
+
+
+def _paragraph_is_blank_page_break_only(p_el: ET.Element) -> bool:
+    """True when a paragraph carries only a page break and no visible text."""
+
+    if _local_name(p_el.tag) != "p":
+        return False
+    if _paragraph_plain_text(p_el) != "":
+        return False
+    brs = p_el.findall(".//w:br", NS)
+    if len(brs) != 1:
+        return False
+    return brs[0].get(f"{{{WORD_NAMESPACE}}}type") == "page"
+
+
+def _relocate_misplaced_page_break_before_exec_summary(container: ET.Element) -> bool:
+    """
+    Keep a page-break-only blank paragraph attached to the executive summary boundary.
+
+    In the cervical front matter, a page-break paragraph can drift ahead of the
+    inserted ``TABLE OF REVISIONS`` block, which creates the wrong pagination
+    between the abbreviation table and the revisions section.
+    """
+
+    children = list(container)
+    break_idx: int | None = None
+    rev_idx: int | None = None
+    exec_idx: int | None = None
+    for i, ch in enumerate(children):
+        if _local_name(ch.tag) != "p":
+            continue
+        txt = _paragraph_plain_text(ch).strip().upper()
+        if break_idx is None and _paragraph_is_blank_page_break_only(ch):
+            next_p = children[i + 1] if i + 1 < len(children) else None
+            if (
+                next_p is not None
+                and _local_name(next_p.tag) == "p"
+                and _paragraph_plain_text(next_p).strip().upper() == "TABLE OF REVISIONS"
+            ):
+                break_idx = i
+                rev_idx = i + 1
+                continue
+        if rev_idx is not None and txt == "EXECUTIVE SUMMARY OF THE SPONSOR’S US CLINICAL STUDY EFFORT":
+            exec_idx = i
+            break
+    if break_idx is None or rev_idx is None or exec_idx is None:
+        return False
+
+    page_break_p = children[break_idx]
+    container.remove(page_break_p)
+    insert_idx = exec_idx - 1  # removal shifts indices left by one
+    container.insert(insert_idx, page_break_p)
+    return True
+
+
+def _drop_blank_spacer_before_page_break_heading_after_toc(container: ET.Element) -> bool:
+    """
+    Remove an orphanable blank spacer between the TOC block and a page-break heading.
+
+    Word can strand a normal blank paragraph onto its own page when it falls between
+    the last TOC line and a following heading that already has ``w:pageBreakBefore``.
+    Keep the heading break and drop only the empty spacer so the next section starts
+    on the intended page without a visual blank page in between.
+    """
+
+    children = list(container)
+    changed = False
+    i = 0
+    while i + 1 < len(children):
+        spacer = children[i]
+        next_el = children[i + 1]
+        prev_para: ET.Element | None = None
+        for j in range(i - 1, -1, -1):
+            cand = children[j]
+            if _local_name(cand.tag) == "p":
+                prev_para = cand
+                break
+        if (
+            prev_para is not None
+            and (_p_paragraph_style_id(prev_para) or "").startswith("TOC")
+            and _local_name(spacer.tag) == "p"
+            and _paragraph_plain_text(spacer) == ""
+            and spacer.find(".//w:br", NS) is None
+            and spacer.find("w:pPr/w:sectPr", NS) is None
+            and _local_name(next_el.tag) == "p"
+            and next_el.find("w:pPr/w:pageBreakBefore", NS) is not None
+        ):
+            container.remove(spacer)
+            children.pop(i)
+            changed = True
+            continue
+        i += 1
+    return changed
+
+
+def _revised_alignment_step_is_blank_page_break(
+    alignment: list,
+    step_index: int,
+    revised_block_elements: list[ET.Element] | None,
+) -> bool:
+    """True when *step_index* is a revised-only blank paragraph containing only a page break."""
+
+    if revised_block_elements is None or step_index < 0 or step_index >= len(alignment):
+        return False
+    row = alignment[step_index]
+    if row.original_paragraph_index is not None or row.revised_paragraph_index is None:
+        return False
+    rj = row.revised_paragraph_index
+    if rj >= len(revised_block_elements):
+        return False
+    rev_el = revised_block_elements[rj]
+    return _local_name(rev_el.tag) == "p" and _paragraph_is_blank_page_break_only(rev_el)
+
+
+def _should_drop_blank_original_before_revised_page_break_insert(
+    alignment: list,
+    step_index: int,
+    el: ET.Element,
+    revised_block_elements: list[ET.Element] | None,
+) -> bool:
+    """
+    Drop an original blank paragraph when it is immediately replaced by a revised-only
+    blank page-break paragraph before the same following matched block.
+    """
+
+    if _local_name(el.tag) != "p":
+        return False
+    if _paragraph_plain_text(el) != "" or _paragraph_is_blank_page_break_only(el):
+        return False
+    return _revised_alignment_step_is_blank_page_break(alignment, step_index + 1, revised_block_elements)
 
 
 def _apply_matched_table_track_changes(
@@ -3128,6 +3316,9 @@ def _apply_track_changes_to_structural_container(
                 and _local_name(revised_block_elements[rj].tag) == "p"
             ):
                 rev_el_for_match = revised_block_elements[rj]
+            if rev_el_for_match is not None:
+                _sync_page_break_before_to_revised(el, rev_el_for_match)
+                _sync_blank_paragraph_structure_to_revised(el, rev_el_for_match)
             if _paragraph_style_is_toc(el):
                 if not _toc_matched_line_needs_revision(orig_para, rev_para, config):
                     continue
@@ -3169,6 +3360,13 @@ def _apply_track_changes_to_structural_container(
                 continue
             orig_para = oblock  # type: ignore[assignment]
             if not _paragraph_needs_revision(orig_para, empty_rev, config):
+                if _should_drop_blank_original_before_revised_page_break_insert(
+                    alignment,
+                    step_i,
+                    el,
+                    revised_block_elements,
+                ):
+                    container.remove(el)
                 continue
             if _paragraph_style_is_toc(el):
                 _replace_toc_paragraph_with_del_preserving_layout(
@@ -3510,6 +3708,15 @@ def _body_insert_index_before_next_orig_block(
             break
     if next_oi is not None and next_oi < len(block_els):
         anchor = block_els[next_oi]
+        if next_oi > 0:
+            prev_anchor = block_els[next_oi - 1]
+            if (
+                _local_name(anchor.tag) == "p"
+                and _local_name(prev_anchor.tag) == "p"
+                and _paragraph_plain_text(prev_anchor) == ""
+                and prev_anchor.find(".//w:br[@w:type='page']", NS) is not None
+            ):
+                anchor = prev_anchor
         return children.index(anchor)
     sect = container.find("w:sectPr", NS)
     if sect is not None:
@@ -3591,10 +3798,9 @@ def apply_body_track_changes_to_document_root(
         revised_block_elements=revised_block_elements,
     )
     _post_merge_consolidated_list_full_paragraph_deletes(body)
-    relocated_legacy_toc_title = _relocate_legacy_toc_title_before_first_table_to_toc_section(
-        body
-    )
-    _ensure_page_break_before_toc_heading_after_first_table(body)
+    _relocate_legacy_toc_title_before_first_table_to_toc_section(body)
+    _drop_blank_spacer_before_page_break_heading_after_toc(body)
+    _relocate_misplaced_page_break_before_exec_summary(body)
 
 
 def apply_track_changes_to_hdr_ftr_root(

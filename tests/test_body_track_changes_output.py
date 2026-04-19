@@ -1091,10 +1091,10 @@ def test_scrum130_merges_consecutive_list_bullet_full_deletes_without_intro(
     assert mp.find("w:pPr/w:pStyle", NS).get(f"{{{WORD_NS}}}val") == "Normal"
 
 
-def test_scrum130_cervical_abbreviations_consolidated_single_deletion_block(
+def test_scrum130_cervical_abbreviations_keep_separate_deleted_paragraphs_before_insert(
     tmp_path: Path,
 ) -> None:
-    """SCRUM-130: real cervical pair — removed abbreviations list is one ``w:del``, not one per bullet."""
+    """Real cervical pair: keep deleted intro/bullets as separate paragraphs before inserted replacement."""
     repo = Path(__file__).resolve().parents[1]
     v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
     v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
@@ -1110,28 +1110,42 @@ def test_scrum130_cervical_abbreviations_consolidated_single_deletion_block(
     root = load_word_document_xml_root(out)
     body = root.find("w:body", NS)
     assert body is not None
-    abbrev_p: ET.Element | None = None
-    for p in body.findall("w:p", NS):
-        if "following terms" in _collect_del_text(p).lower():
-            abbrev_p = p
-            break
-    assert abbrev_p is not None
-    assert len(abbrev_p.findall("w:del", NS)) == 1
-    one_del = abbrev_p.find("w:del", NS)
-    assert one_del is not None
-    blob = _collect_del_text(one_del)
-    # v2 may still match the first body line (“This list serves…”) unchanged; the consolidated
-    # delete then starts at the next paragraph + bullets (see cervical v1/v2 alignment).
-    assert "following terms" in blob.lower()
-    assert "Study and trial" in blob
-    assert "Black and African American" in blob
-    assert "\n" not in blob
-    assert len(one_del.findall("w:r", NS)) >= 1
-    assert len(one_del.findall(".//w:br", NS)) >= 1
-    ppr = abbrev_p.find("w:pPr", NS)
-    assert ppr is not None
-    assert ppr.find("w:pStyle", NS).get(f"{{{WORD_NS}}}val") == "Normal"
-    assert ppr.find("w:numPr", NS) is None
+    children = [ch for ch in list(body) if _local_name(ch.tag) in ("p", "tbl")]
+    terms_idx = next(
+        i
+        for i, ch in enumerate(children)
+        if _local_name(ch.tag) == "p"
+        and "Terms describing racial and ethnic categories" in _collect_t_text(ch)
+    )
+
+    deleted_group = children[terms_idx - 4 : terms_idx]
+    assert [_local_name(ch.tag) for ch in deleted_group] == ["p", "p", "p", "p"]
+    expected = [
+        ("Paragraph", "The following terms may be used interchangeably in this report:"),
+        ("ListBullet", "Study and trial"),
+        ("ListBullet", "Black and African American"),
+        ("ListBullet", "White and non-Hispanic White"),
+    ]
+    for p, (style, deleted_text) in zip(deleted_group, expected, strict=True):
+        ppr = p.find("w:pPr", NS)
+        assert ppr is not None
+        ps = ppr.find("w:pStyle", NS)
+        assert ps is not None and ps.get(f"{{{WORD_NS}}}val") == style
+        dels = p.findall("w:del", NS)
+        assert len(dels) == 1
+        assert deleted_text in _collect_del_text(dels[0])
+
+    merged_blob = " ".join(_collect_del_text(p) for p in deleted_group)
+    assert "The following terms may be used interchangeably in this report:" in merged_blob
+    assert "Study and trial" in merged_blob
+    assert "Black and African American" in merged_blob
+    assert "White and non-Hispanic White" in merged_blob
+    assert not any(
+        p.find("w:pPr/w:pStyle", NS) is not None
+        and p.find("w:pPr/w:pStyle", NS).get(f"{{{WORD_NS}}}val") == "Normal"
+        and "following terms" in _collect_del_text(p).lower()
+        for p in deleted_group
+    )
 
 
 def test_emit_table_cell_text_change_has_revision_markers(tmp_path: Path) -> None:
@@ -1669,6 +1683,107 @@ def test_revised_only_blank_toc_paragraph_preserves_structure_without_empty_inse
     assert p.find("w:pPr/w:pStyle", NS) is not None
     assert p.find("w:pPr/w:sectPr", NS) is not None
     assert p.find("w:ins", NS) is None
+
+
+def test_scrum134_cervical_does_not_add_extra_page_breaks_after_toc_and_tables(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-134: keep sponsor-style blank/page-break structure after TOC and revision tables."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum134_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    by_text: dict[str, ET.Element] = {}
+    for p in body.findall("w:p", NS):
+        txt = _collect_t_text(p).strip()
+        if txt:
+            by_text[txt] = p
+
+    def has_page_break_before(text: str) -> bool:
+        p = by_text[text]
+        ppr = p.find("w:pPr", NS)
+        return ppr is not None and ppr.find("w:pageBreakBefore", NS) is not None
+
+    assert not has_page_break_before("TABLE OF CONTENTS")
+    assert has_page_break_before("LIST OF TABLES")
+    assert not has_page_break_before("LIST OF ABBREVIATIONS AND DEFINITION OF TERMS")
+    assert not has_page_break_before("Key partnership and patient advocacy measures include:")
+    assert has_page_break_before("REFERENCES")
+
+    children = [ch for ch in list(body) if _local_name(ch.tag) in ("p", "tbl")]
+    abbrev_table_idx = next(
+        i
+        for i, ch in enumerate(children)
+        if _local_name(ch.tag) == "tbl"
+        and "Abbreviation" in _collect_t_text(ch)
+        and "Definition" in _collect_t_text(ch)
+    )
+    rev_heading_idx = next(
+        i
+        for i, ch in enumerate(children)
+        if i > abbrev_table_idx
+        and _local_name(ch.tag) == "p"
+        and "TABLE OF REVISIONS" in _collect_t_text(ch)
+    )
+    exec_idx = next(
+        i
+        for i, ch in enumerate(children)
+        if i > rev_heading_idx
+        and _local_name(ch.tag) == "p"
+        and "EXECUTIVE SUMMARY OF THE SPONSOR" in _collect_t_text(ch)
+    )
+    between = children[rev_heading_idx + 1 : exec_idx]
+    assert [_local_name(ch.tag) for ch in between] == ["tbl", "p", "p"]
+    first_blank, second_blank = between[1], between[2]
+    assert _collect_t_text(first_blank) == ""
+    assert _collect_t_text(second_blank) == ""
+    assert first_blank.find(".//w:br", NS) is None
+    br = second_blank.find(".//w:br", NS)
+    assert br is not None
+    assert br.get(f"{{{WORD_NS}}}type") == "page"
+
+    list_tables_idx = next(
+        i
+        for i, ch in enumerate(children)
+        if _local_name(ch.tag) == "p" and _collect_t_text(ch).strip() == "LIST OF TABLES"
+    )
+    last_toc_idx = max(
+        i
+        for i, ch in enumerate(children[:list_tables_idx])
+        if _local_name(ch.tag) == "p" and _collect_t_text(ch).strip() == "6REFERENCES31"
+    )
+    assert children[last_toc_idx + 1] is children[list_tables_idx]
+    list_abbrev_idx = next(
+        i
+        for i, ch in enumerate(children)
+        if i > list_tables_idx
+        and _local_name(ch.tag) == "p"
+        and _collect_t_text(ch).strip() == "LIST OF ABBREVIATIONS AND DEFINITION OF TERMS"
+    )
+    between_lot_and_abbrev = children[list_tables_idx + 1 : list_abbrev_idx]
+    assert [_local_name(ch.tag) for ch in between_lot_and_abbrev] == ["p", "p", "p", "p"]
+    assert all(_local_name(ch.tag) == "p" for ch in between_lot_and_abbrev)
+    # Three table-of-figures lines, then one page-break-only blank paragraph.
+    for p in between_lot_and_abbrev[:3]:
+        assert p.find(".//w:br", NS) is None
+    trailing_break = between_lot_and_abbrev[3]
+    br = trailing_break.find(".//w:br", NS)
+    assert br is not None
+    assert br.get(f"{{{WORD_NS}}}type") == "page"
 
 
 def test_emit_preserves_w_p_pr(tmp_path: Path) -> None:
