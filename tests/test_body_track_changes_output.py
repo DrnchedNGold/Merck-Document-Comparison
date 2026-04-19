@@ -726,6 +726,23 @@ def test_word_token_similarity_ratio_shared_structure_scores_higher() -> None:
     assert _word_token_similarity_ratio("foo bar hello world", "foo bar goodbye world") >= 0.20
 
 
+def test_word_token_similarity_ratio_large_similar_paragraph_clears_inline_threshold() -> None:
+    """Large same-paragraph edits should stay above the inline-diff threshold."""
+
+    orig = (
+        "The sponsor will continue to build upon diversity efforts expected by the FDA "
+        "and will embed participant diversity and inclusion into product development "
+        "across clinical planning, study recruitment, site activation, and monitoring."
+    )
+    rev = (
+        "The sponsor will continue to build upon diversity efforts expected by the FDA "
+        "and will embed participant diversity and inclusion into product development "
+        "across clinical planning, study recruitment, country selection, site activation, "
+        "enrollment monitoring, and patient retention."
+    )
+    assert _word_token_similarity_ratio(orig, rev) >= 0.70
+
+
 def test_build_paragraph_track_change_delete_has_del_with_del_text() -> None:
     orig = _paragraph_block("Hello world")
     rev = _paragraph_block("Hello")
@@ -740,6 +757,25 @@ def test_build_paragraph_track_change_delete_has_del_with_del_text() -> None:
     dels = [e for e in els if _local_name(e.tag) == "del"]
     assert len(dels) == 1
     assert _collect_del_text(dels[0]) == " world"
+
+
+def test_build_paragraph_track_change_partial_token_edit_stays_inline_not_full_replace() -> None:
+    """Small token edits must not collapse the paragraph into one full delete/insert."""
+
+    orig = _paragraph_block("Marker status was L in the baseline sample.")
+    rev = _paragraph_block("Marker status was (L) in the baseline sample.")
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+    )
+    assert [_local_name(e.tag) for e in els] != ["del", "ins"]
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    assert "Marker status was " in plain
+    assert "in the baseline sample." in plain
 
 
 def test_build_paragraph_track_change_unrelated_phrase_block_del_ins() -> None:
