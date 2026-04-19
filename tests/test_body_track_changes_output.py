@@ -591,6 +591,157 @@ def test_build_paragraph_track_change_rotates_shared_punctuation_around_deleted_
     assert any(chunk.endswith(", ") for chunk in dels)
 
 
+def test_numeric_grouping_comma_removal_is_inline_delete_not_full_replace() -> None:
+    """SCRUM-141: comma-only numeric formatting edits should delete just the comma."""
+    els = _track_change_elements_for_concat_texts(
+        "5,003",
+        "5003",
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+    )
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    assert len(dels) == 1
+    assert len(inses) == 0
+    assert _collect_del_text(dels[0]) == ","
+    assert plain.replace(" ", "") == "5003"
+
+
+def test_preserving_path_numeric_grouping_comma_only_inline_delete() -> None:
+    """SCRUM-141: table cells use preserving emit; comma-only edits must not full-replace the cell."""
+    p = ET.Element(f"{{{WORD_NS}}}p")
+    r_el = ET.Element(f"{{{WORD_NS}}}r")
+    t = ET.SubElement(r_el, f"{{{WORD_NS}}}t")
+    t.text = "5,003"
+    p.append(r_el)
+    orig = {"type": "paragraph", "id": "p1", "runs": [{"text": "5,003"}]}
+    rev = {"type": "paragraph", "id": "p1", "runs": [{"text": "5003"}]}
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+        source_p_el=p,
+    )
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    inses = [e for e in els if _local_name(e.tag) == "ins"]
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    assert len(dels) == 1
+    assert len(inses) == 0
+    assert _collect_del_text(dels[0]) == ","
+    assert plain.replace(" ", "") == "5003"
+
+
+def test_numeric_cell_partial_change_keeps_unchanged_prefix_and_parentheses() -> None:
+    """
+    SCRUM-141: small internal edits inside a numeric table cell should not delete
+    large unchanged spans.
+    """
+    els = _track_change_elements_for_concat_texts(
+        "6566 (47.3%)",
+        "6,376 (47.8%)",
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    del_all = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    ins_all = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "ins")
+    # Must keep shared structure plain.
+    assert "(" in plain and "%)" in plain
+    # Must not delete the shared " (" prefix into a giant replace span.
+    assert " (" not in del_all
+    # Should at least revise some digits.
+    assert any(ch.isdigit() for ch in del_all)
+    assert any(ch.isdigit() for ch in ins_all)
+
+
+def test_preserving_path_numeric_cell_partial_change_keeps_structure() -> None:
+    """
+    SCRUM-141: table cells use ``source_p_el`` preserving emit; partial numeric edits
+    must not monolithically strike the whole cell.
+
+    Assertions are behavioral (plain vs revision regions), not opcode counts or exact
+    chunk boundaries, so refactors can still change internal TC shape.
+    """
+    orig_s = "6566 (47.3%)"
+    rev_s = "6,376 (47.8%)"
+    p = ET.Element(f"{{{WORD_NS}}}p")
+    r_el = ET.Element(f"{{{WORD_NS}}}r")
+    t = ET.SubElement(r_el, f"{{{WORD_NS}}}t")
+    t.text = orig_s
+    p.append(r_el)
+    orig = {"type": "paragraph", "id": "p1", "runs": [{"text": orig_s}]}
+    rev = {"type": "paragraph", "id": "p1", "runs": [{"text": rev_s}]}
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+        source_p_el=p,
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    del_all = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    ins_all = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "ins")
+    assert "(" in plain and "%)" in plain
+    assert " (" not in del_all
+    assert any(ch.isdigit() for ch in del_all)
+    assert any(ch.isdigit() for ch in ins_all)
+    # Coarse regression: entire original cell must not be one undifferentiated deletion.
+    assert del_all.replace(" ", "") != orig_s.replace(" ", "")
+
+
+def test_table_header_cell_does_not_delete_unchanged_estimated_number_prefix() -> None:
+    """SCRUM-141: table header edits should not strike through unchanged leading phrase."""
+    prefix = "Estimated Number of New Cases in "
+    orig = prefix + "2023b, c, d, n (%)"
+    rev = prefix + "2025b,c,d, n (%)"
+    els = _track_change_elements_for_concat_texts(
+        orig,
+        rev,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    del_all = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    assert prefix in plain
+    assert prefix not in del_all
+
+
+def test_preserving_path_table_header_keeps_long_prefix_plain() -> None:
+    """SCRUM-141: preserving emit for table cells must apply char-level replace like concat path."""
+    prefix = "Estimated Number of New Cases in "
+    orig_s = prefix + "2023b, c, d, n (%)"
+    rev_s = prefix + "2025b,c,d, n (%)"
+    p = ET.Element(f"{{{WORD_NS}}}p")
+    r_el = ET.Element(f"{{{WORD_NS}}}r")
+    t = ET.SubElement(r_el, f"{{{WORD_NS}}}t")
+    t.text = orig_s
+    p.append(r_el)
+    orig = {"type": "paragraph", "id": "p1", "runs": [{"text": orig_s}]}
+    rev = {"type": "paragraph", "id": "p1", "runs": [{"text": rev_s}]}
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+        source_p_el=p,
+    )
+    plain = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+    del_all = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    assert prefix in plain
+    assert prefix not in del_all
+
+
 def test_build_paragraph_track_change_dedupes_reinserted_plain_anchor() -> None:
     """A repeated anchor should not survive as both plain text and a duplicate insert."""
     orig = _paragraph_block(
