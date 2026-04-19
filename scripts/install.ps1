@@ -23,12 +23,42 @@ function Fail($msg) {
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
+function Test-PythonCandidate($exe, $args) {
+  $null = & $exe @args -c "import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)" 2>$null
+  return ($LASTEXITCODE -eq 0)
+}
+
 function Find-Python {
-  $candidates = @("python3.13", "python3.12", "python")
+  # Prefer the Windows Python launcher (py.exe) when present.
+  $candidates = @(
+    @{ Exe = "py"; Args = @("-3.13") },
+    @{ Exe = "py"; Args = @("-3.12") },
+    @{ Exe = "python"; Args = @() },
+    @{ Exe = "python3.13"; Args = @() },
+    @{ Exe = "python3.12"; Args = @() }
+  )
+
   foreach ($c in $candidates) {
-    $cmd = Get-Command $c -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Name }
+    $cmd = Get-Command $c.Exe -ErrorAction SilentlyContinue
+    if (-not $cmd) { continue }
+
+    # Avoid WindowsApps aliases/stubs (common for python3.x on Windows).
+    if ($cmd.Source -like "*\WindowsApps\*") { continue }
+
+    if (Test-PythonCandidate $cmd.Source $c.Args) {
+      return @{ Exe = $cmd.Source; Args = $c.Args }
+    }
   }
+
+  # Fall back to trying WindowsApps commands if they are the only thing available.
+  foreach ($c in $candidates) {
+    $cmd = Get-Command $c.Exe -ErrorAction SilentlyContinue
+    if (-not $cmd) { continue }
+    if (Test-PythonCandidate $cmd.Source $c.Args) {
+      return @{ Exe = $cmd.Source; Args = $c.Args }
+    }
+  }
+
   return $null
 }
 
@@ -42,13 +72,11 @@ Install Python 3.12+ (recommended via winget), then re-run:
 "@
 }
 
-$verOk = & $Py -c "import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)"
-if ($LASTEXITCODE -ne 0) {
-  Fail "Detected $Py but it is older than Python 3.12. Please install Python 3.12+."
-}
+$PyExe = $Py.Exe
+$PyArgs = $Py.Args
 
 if (-not (Test-Path ".venv")) {
-  & $Py -m venv .venv
+  & $PyExe @PyArgs -m venv .venv
 }
 
 $VenvPy = Join-Path ".venv" "Scripts\python.exe"
