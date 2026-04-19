@@ -376,8 +376,8 @@
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 1418,
-          "ins": 10164
+          "del": 1422,
+          "ins": 10168
         },
         "word/footer1.xml": {
           "del": 2,
@@ -602,8 +602,8 @@
       },
       "summary": {
         "document": {
-          "del": 1418,
-          "ins": 10164
+          "del": 1422,
+          "ins": 10168
         },
         "footers": {
           "del": 4,
