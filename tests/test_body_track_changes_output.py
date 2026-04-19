@@ -11,6 +11,7 @@ import pytest
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
 from engine.body_revision_emit import (
     _build_toc_matched_line_track_change_elements,
+    _track_change_elements_for_concat_texts,
     _word_token_similarity_ratio,
     build_paragraph_track_change_elements,
     emit_docx_with_body_track_changes,
@@ -222,6 +223,117 @@ def test_toc_matched_line_track_change_keeps_shared_title_prefix_before_product_
     assert len(dels) == 1 and len(inses) == 1
     assert "MK-2870" in _collect_del_text(dels[0])
     assert "sacituzumab tirumotecan" in _collect_t_text(inses[0])
+
+
+def test_heading2_title_diff_coalesce_preserves_long_shared_tail() -> None:
+    """Body ``Heading2`` lines (no ``1.1`` prefix in runs): suffix coalesce must not swallow a long shared clause."""
+
+    orig = _paragraph_block(
+        "Incidence, Mortality, and Prevalence in the Overall Population and "
+        "Underrepresented Racial and Ethnic Populations"
+    )
+    rev = _paragraph_block(
+        "Disease Epidemiology in the Overall Population and Underrepresented Racial and Ethnic Populations"
+    )
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+    )
+    del_all = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    ins_all = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "ins")
+    shared = "in the Overall Population and Underrepresented Racial and"
+    assert shared not in del_all and shared not in ins_all
+    assert "Incidence" in del_all
+    assert "Disease Epidemiology" in ins_all
+
+
+def test_concat_tc_emitted_text_counts_w_tab_to_avoid_false_numeric_corruption() -> None:
+    """
+    Tab leaders between a product token and a page number must not flatten into one
+    digit run (e.g. 2870 + tab + 11 misread as 287011), which previously triggered
+    NUMERIC_CORRUPTION_FALLBACK and replaced a fine-grained diff with full-line del/ins.
+    """
+
+    mid_o = "SCOPE OF MEDICAL PRODUCT DEVELOPMENT PROGRAM: MK-2870\t11"
+    mid_r = "SCOPE OF MEDICAL PRODUCT DEVELOPMENT PROGRAM: sacituzumab tirumotecan\t18"
+    els = _track_change_elements_for_concat_texts(
+        mid_o,
+        mid_r,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-19T00:00:00Z",
+    )
+    kinds = [_local_name(e.tag) for e in els]
+    assert "r" in kinds, "expected preserved plain runs before del/ins, not full-paragraph rewrite"
+    dels = [e for e in els if _local_name(e.tag) == "del"]
+    assert dels and all("SCOPE" not in _collect_del_text(d) for d in dels)
+
+
+def _paragraph_track_visible_text(p: ET.Element) -> str:
+    """Plain ``w:t``, ``w:delText``, and ``w:t`` inside ``w:ins`` (reading order is approximate)."""
+
+    parts: list[str] = []
+    parts.append(_collect_t_text(p))
+    parts.append(_collect_del_text(p))
+    for ins in p.findall(".//w:ins", NS):
+        for t in ins.findall(".//w:t", NS):
+            if t.text:
+                parts.append(t.text)
+    return "".join(parts)
+
+
+def test_toc_line_cervical_section_11_inline_title_diff_single_paragraph(tmp_path: Path) -> None:
+    """TOC-style section 1.1 line: title + page change stay in one w:p with inline del/ins."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "toc_11_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    title_tail = "in the Overall Population and Underrepresented Racial and Ethnic Populations"
+    target_p = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if "1.1" in _paragraph_track_visible_text(p)
+            and title_tail in _paragraph_track_visible_text(p)
+            and ("Incidence" in _collect_del_text(p) or "Disease" in _paragraph_track_visible_text(p))
+        ),
+        None,
+    )
+    assert target_p is not None
+    vis = _paragraph_track_visible_text(target_p)
+    assert "Incidence" in _collect_del_text(target_p)
+    assert "Disease Epidemiology" in vis
+    assert title_tail in vis
+    shared_mid = "in the Overall Population and Underrepresented Racial and"
+    ins_text = "".join(t.text or "" for t in target_p.findall(".//w:ins//w:t", NS))
+    assert shared_mid not in _collect_del_text(target_p), (
+        "shared title tail must stay plain text, not inside w:del (over-wide replace)"
+    )
+    assert shared_mid not in ins_text, (
+        "shared title tail must stay plain text, not inside w:ins (over-wide replace)"
+    )
+    n_del = len(target_p.findall(".//w:del", NS))
+    n_ins = len(target_p.findall(".//w:ins", NS))
+    assert n_del >= 1 and n_ins >= 1 and n_del <= 6 and n_ins <= 6, (
+        f"expected inline TOC revisions, not a single full-line pair; del={n_del} ins={n_ins}"
+    )
 
 
 def test_build_paragraph_track_change_preserves_unchanged_date_year_suffix() -> None:

@@ -1173,6 +1173,11 @@ def _refine_replace_boundaries(
 # broader ``replace`` prefix than the raw matcher (e.g. include ``recently`` on both sides).
 _TC_ALIGN_MIN_COMMON_SUFFIX_TOKENS = 3
 
+# When the matcher already emitted a long ``equal`` tail after ``replace`` (two-opcode form),
+# do **not** re-derive boundaries from the global 3-token suffix only: that can swallow a
+# long shared clause back into ``replace`` (e.g. Heading2 titles with repeated ``and`` tokens).
+_TC_COALESCE_SKIP_WHEN_TAIL_EQUAL_MIN = 8
+
 # Minimum equal-token count at end of opcode list to treat as stable tail for unstable merge.
 _TC_ALIGN_MIN_STABLE_TAIL_TOKENS = 4
 
@@ -1205,6 +1210,11 @@ def _coalesce_opcodes_at_longest_common_token_suffix(
     For a two-opcode ``replace`` + ``equal`` diff, this can move tokens out of the
     equal span into the replace when the matcher over-anchors on a shared word
     (e.g. ``recently``) before the tail. Leading ``equal`` opcodes are never merged.
+
+    If the trailing ``equal`` is already long (at least
+    ``_TC_COALESCE_SKIP_WHEN_TAIL_EQUAL_MIN`` tokens), skip: suffix-only
+    realignment would incorrectly pull a large shared clause into ``replace``
+    (e.g. ``Heading2`` titles with repeated words like ``and``).
     """
 
     m = _TC_ALIGN_MIN_COMMON_SUFFIX_TOKENS
@@ -1217,6 +1227,10 @@ def _coalesce_opcodes_at_longest_common_token_suffix(
         return None
     if len(opcodes) == 2:
         if opcodes[0][0] != "replace" or opcodes[1][0] != "equal":
+            return None
+        _t0, _r_i1, r_i2, _r_j1, r_j2 = opcodes[0]
+        _t1, e_i1, e_i2, e_j1, e_j2 = opcodes[1]
+        if r_i2 == e_i1 and r_j2 == e_j1 and (e_i2 - e_i1) >= _TC_COALESCE_SKIP_WHEN_TAIL_EQUAL_MIN:
             return None
     elif len(opcodes) < 3:
         return None
@@ -2147,10 +2161,21 @@ def _max_digit_run_length(s: str) -> int:
 
 
 def _concat_tc_collect_emitted_text(elements: list[ET.Element]) -> str:
+    """
+    Flatten emitted track-change nodes to a string for sanity checks.
+
+    Includes ``w:tab`` stops as ``\\t`` so digit runs are not glued across tab
+    leaders (e.g. ``MK-2870`` + tab + ``11`` must not read as ``287011`` for
+    :func:`_concat_tc_emitted_numeric_corruption`).
+    """
+
     parts: list[str] = []
     for root in elements:
         for el in root.iter():
-            if _local_name(el.tag) in ("t", "delText") and el.text:
+            ln = _local_name(el.tag)
+            if ln == "tab":
+                parts.append("\t")
+            elif ln in ("t", "delText") and el.text:
                 parts.append(el.text)
     return "".join(parts)
 
@@ -2487,6 +2512,12 @@ def _build_structured_toc_field_diff(
     section field and shared title prefix plain, then revise only the changed
     title tail / page tail. This avoids matching a TOC tab to spaces inside the
     revised title text.
+
+    Titles that diverge from the first character (no long shared prefix) return
+    ``None`` so :func:`_track_change_elements_for_concat_texts` runs on the **full**
+    line. Diffing the title column alone would drop the ``section<TAB>`` token
+    anchor and can mis-align repeated words (e.g. multiple ``and``), duplicating a
+    long shared phrase in both ``w:del`` and ``w:ins``.
     """
 
     ofields = orig_text.split("\t")
