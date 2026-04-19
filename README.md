@@ -20,6 +20,10 @@ Top-level layout used for the monorepo baseline:
 - Git
 - GitHub CLI (`gh`) for PR creation from terminal/agent workflows
 
+## Install (Windows / macOS / Linux)
+
+See [`docs/INSTALL.md`](docs/INSTALL.md) for one-command installers and Tk/tkinter notes.
+
 ## Install deps and run tests
 
 Recommended (fully automated, no host Python setup required):
