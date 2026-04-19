@@ -69,7 +69,9 @@ from .diff_tokens import (
     StructuredOrigToken,
     bounds_from_token_indices,
     equal_span_surface,
+    lcs_token_similarity_ratio,
     maybe_log_lcs_debug,
+    non_whitespace_norm_keys,
     norm_keys,
     structured_orig_tokens_from_aligned_runs,
     structured_token_index_bounds_for_global_span,
@@ -934,6 +936,9 @@ def _w_ins_segment_from_revised_paragraph_runs(
 # sentences still collapse to one ``w:del`` + one ``w:ins`` (SCRUM-131).
 _TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX = 0.35
 _INSERTED_TABLE_CELL_SHADE_FILL = "D9EAF7"
+_INLINE_DIFF_SIMILARITY_MIN = 0.70
+_INLINE_DIFF_ANCHORED_REWRITE_SIMILARITY_MIN = 0.55
+_INLINE_DIFF_STRONG_ANCHOR_MIN_TOKENS = 4
 
 
 def _word_token_similarity_ratio(a: str, b: str) -> float:
@@ -944,11 +949,7 @@ def _word_token_similarity_ratio(a: str, b: str) -> float:
 
     ta = [t for t in tokenize_for_lcs(a) if not t.surface.isspace()]
     tb = [t for t in tokenize_for_lcs(b) if not t.surface.isspace()]
-    if not ta and not tb:
-        return 1.0
-    if not ta or not tb:
-        return 0.0
-    return difflib.SequenceMatcher(None, norm_keys(ta), norm_keys(tb), autojunk=False).ratio()
+    return lcs_token_similarity_ratio(non_whitespace_norm_keys(ta), non_whitespace_norm_keys(tb))
 
 
 def _emit_preserving_replace_multitoken_bounded(
@@ -1383,6 +1384,19 @@ def _merge_unstable_opcode_regions(
 
     prefix = opcodes[:stable_start]
     if not prefix:
+        return opcodes
+
+    matched_tokens = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
+    similarity = lcs_token_similarity_ratio(
+        non_whitespace_norm_keys(orig_tokens),
+        non_whitespace_norm_keys(rev_tokens),
+    )
+    if (
+        similarity >= _INLINE_DIFF_SIMILARITY_MIN
+        and prefix[0][0] == "equal"
+        and (prefix[0][2] - prefix[0][1]) >= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
+        and matched_tokens > 0
+    ):
         return opcodes
 
     meaningful_equal_lengths = [
@@ -1987,6 +2001,14 @@ def _prefer_later_stronger_equal_anchor(
 
     if len(opcodes) < 4:
         return opcodes
+
+    overall_similarity = lcs_token_similarity_ratio(
+        non_whitespace_norm_keys(orig_tokens),
+        non_whitespace_norm_keys(rev_tokens),
+    )
+    if overall_similarity >= 0.85:
+        return opcodes
+
     out: list[tuple[str, int, int, int, int]] = []
     i = 0
     while i < len(opcodes):
@@ -2205,17 +2227,76 @@ def classify_change(
     orig_tokens: list,
     rev_tokens: list,
     ratio: float,
-) -> Literal["MICRO_EDIT", "PHRASE_EDIT", "HEAVY_EDIT", "FULL_REWRITE"]:
-    """Route concat-texts diff by :class:`~difflib.SequenceMatcher` ratio on norm keys."""
+) -> Literal["MICRO_EDIT", "PHRASE_EDIT", "HEAVY_EDIT"]:
+    """Route concat-texts diff by shared token similarity, not raw character churn."""
 
     _ = orig_tokens, rev_tokens
     if ratio > 0.92:
         return "MICRO_EDIT"
-    if ratio > 0.75:
+    if ratio >= 0.80:
         return "PHRASE_EDIT"
-    if ratio > 0.4:
-        return "HEAVY_EDIT"
-    return "FULL_REWRITE"
+    return "HEAVY_EDIT"
+
+
+def _meaningful_equal_anchor_lengths(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+) -> list[int]:
+    lengths: list[int] = []
+    for tag, i1, i2, _j1, _j2 in opcodes:
+        if tag != "equal":
+            continue
+        meaningful = sum(
+            1 for tok in orig_tokens[i1:i2] if any(ch.isalnum() for ch in tok.surface)
+        )
+        if meaningful:
+            lengths.append(meaningful)
+    return lengths
+
+
+def _should_force_inline_diff_for_low_similarity(
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+) -> bool:
+    """
+    Keep low-similarity diffs inline when they are still one anchored local edit.
+
+    This catches cases like ``Hello`` → ``Hello world`` or ``Topic\t6`` → ``Topic\t7``
+    where the overall token overlap is below the global 0.7 threshold but the
+    change is obviously a small insertion/deletion/replacement around a stable
+    prefix or suffix, not a true paragraph rewrite.
+    """
+
+    change_ops = [op for op in opcodes if op[0] != "equal"]
+    if not change_ops or len(change_ops) > 2:
+        return False
+    anchor_lengths = _meaningful_equal_anchor_lengths(opcodes, orig_tokens)
+    if not anchor_lengths:
+        return False
+    if max(anchor_lengths) < 1:
+        return False
+    return opcodes[0][0] == "equal" or opcodes[-1][0] == "equal"
+
+
+def _should_emit_full_rewrite_for_token_diff(
+    similarity: float,
+    opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+) -> bool:
+    if similarity >= _INLINE_DIFF_SIMILARITY_MIN:
+        return False
+    anchor_lengths = _meaningful_equal_anchor_lengths(opcodes, orig_tokens)
+    if len(anchor_lengths) >= 3 and sum(anchor_lengths) >= 5:
+        return False
+    if (
+        anchor_lengths
+        and max(anchor_lengths) >= _INLINE_DIFF_STRONG_ANCHOR_MIN_TOKENS
+        and similarity >= _INLINE_DIFF_ANCHORED_REWRITE_SIMILARITY_MIN
+    ):
+        return False
+    if _should_force_inline_diff_for_low_similarity(opcodes, orig_tokens):
+        return False
+    return True
 
 
 def _max_digit_run_length(s: str) -> int:
@@ -2315,26 +2396,19 @@ def _track_change_elements_for_concat_texts(
     matcher = difflib.SequenceMatcher(
         None, norm_keys(orig_tokens), norm_keys(rev_tokens), autojunk=False
     )
-    sm_match_ratio = matcher.ratio()
+    sm_match_ratio = _word_token_similarity_ratio(orig_text, rev_text)
+    opcodes = matcher.get_opcodes()
     classification = classify_change(orig_tokens, rev_tokens, sm_match_ratio)
-    if classification == "FULL_REWRITE":
-        has_meaningful_matching_block = any(
-            block.size >= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
-            for block in matcher.get_matching_blocks()
-            if block.size > 0
-        )
-        if has_meaningful_matching_block:
-            classification = "HEAVY_EDIT"
-        else:
-            if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
-                print(
-                    f"[MDC_DEBUG_TC_CONCAT_FRAG] CLASSIFY_FULL_REWRITE match_ratio={sm_match_ratio:.6f}",
-                    file=sys.stderr,
-                )
-            return [
-                _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
-                _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
-            ]
+    if _should_emit_full_rewrite_for_token_diff(sm_match_ratio, opcodes, orig_tokens):
+        if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+            print(
+                f"[MDC_DEBUG_TC_CONCAT_FRAG] CLASSIFY_FULL_REWRITE match_ratio={sm_match_ratio:.6f}",
+                file=sys.stderr,
+            )
+        return [
+            _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+            _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+        ]
     if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
         print(
             f"[MDC_DEBUG_TC_CONCAT_FRAG] classification={classification} "
@@ -2343,7 +2417,6 @@ def _track_change_elements_for_concat_texts(
             file=sys.stderr,
         )
     maybe_log_lcs_debug("concat_texts", orig_tokens, rev_tokens, matcher)
-    opcodes = matcher.get_opcodes()
     opcodes = _collapse_adjacent_replace_opcodes(opcodes, orig_tokens, rev_tokens)
     opcodes = _refine_replace_boundaries(opcodes, orig_tokens, rev_tokens)
     coalesced_suffix = _coalesce_opcodes_at_longest_common_token_suffix(

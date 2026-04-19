@@ -185,6 +185,41 @@ def test_alignment_pairs_primary_endpoint_paragraph_when_extra_paragraph_at_end(
     assert (2, 2) in pairs, pairs
 
 
+def test_alignment_token_similarity_keeps_large_similar_paragraph_in_place() -> None:
+    """Large same-paragraph rewrites should align instead of reflowing into delete+insert blocks."""
+
+    original = {
+        "version": 1,
+        "blocks": [
+            _p("Intro paragraph."),
+            _p(
+                "The sponsor will continue to build upon diversity efforts expected by the FDA "
+                "and will embed participant diversity and inclusion into product development "
+                "across clinical planning, study recruitment, site activation, and monitoring."
+            ),
+            _p("Tail paragraph."),
+        ],
+    }
+    revised = {
+        "version": 1,
+        "blocks": [
+            _p("Intro paragraph."),
+            _p("Intervening inserted paragraph."),
+            _p(
+                "The sponsor will continue to build upon diversity efforts expected by the FDA "
+                "and will embed participant diversity and inclusion into product development "
+                "across clinical planning, study recruitment, country selection, site activation, "
+                "enrollment monitoring, and patient retention."
+            ),
+            _p("Tail paragraph."),
+        ],
+    }
+
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+    assert (1, 2) in pairs, pairs
+
+
 def test_alignment_near_index_word_jaccard_pairs_after_insert() -> None:
     """Near-diagonal paragraph with heavy char churn but same vocabulary still matches.
 

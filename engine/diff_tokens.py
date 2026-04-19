@@ -56,6 +56,38 @@ def norm_keys(tokens: list[DiffToken]) -> list[str]:
     return [t.norm_key() for t in tokens]
 
 
+def non_whitespace_norm_keys(tokens: list[DiffToken]) -> list[str]:
+    """Normalized keys for non-whitespace tokens only."""
+
+    return [t.norm_key() for t in tokens if not t.surface.isspace()]
+
+
+def lcs_matched_token_count(left_keys: list[str], right_keys: list[str]) -> int:
+    """LCS-equal token count for two normalized token-key sequences."""
+
+    if not left_keys or not right_keys:
+        return 0
+    matcher = difflib.SequenceMatcher(None, left_keys, right_keys, autojunk=False)
+    return sum(i2 - i1 for tag, i1, i2, _j1, _j2 in matcher.get_opcodes() if tag == "equal")
+
+
+def lcs_token_similarity_ratio(left_keys: list[str], right_keys: list[str]) -> float:
+    """
+    Symmetric token similarity based on LCS overlap.
+
+    Uses ``2 * matched / (len(left) + len(right))`` so heavily shared paragraph
+    rewrites still score as "same" when most tokens are preserved, while still
+    rejecting unrelated text that only shares a few anchors.
+    """
+
+    if not left_keys and not right_keys:
+        return 1.0
+    if not left_keys or not right_keys:
+        return 0.0
+    matched = lcs_matched_token_count(left_keys, right_keys)
+    return (2.0 * matched) / (len(left_keys) + len(right_keys))
+
+
 def bounds_from_token_indices(tokens: list[DiffToken], i1: int, i2: int) -> tuple[int, int]:
     """Character ``[start, end)`` in the source string covering ``tokens[i1:i2]``."""
 
