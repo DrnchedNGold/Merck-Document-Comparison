@@ -1185,6 +1185,58 @@ def test_scrum131_cervical_abbreviations_table_diffs_in_place_not_whole_table_in
     assert first_table_container.find(".//w:ins", NS) is not None
 
 
+def test_scrum140_bladder_abbreviation_row_keeps_partial_inline_change(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-140: punctuation-only abbreviation edits should stay on one row inline."""
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("bladder diversity sample docs not present")
+
+    out = tmp_path / "scrum140_bladder_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    rows = root.findall(".//w:tr", NS)
+
+    def _row_cells(tr: ET.Element) -> list[str]:
+        return [
+            "".join(t.text or "" for t in tc.findall(".//w:t", NS))
+            for tc in tr.findall("w:tc", NS)
+        ]
+
+    anchor_rows: dict[str, int] = {}
+    for idx, tr in enumerate(rows):
+        cells = _row_cells(tr)
+        joined = " | ".join(cells)
+        if joined == "PAO | patient advocacy organization":
+            anchor_rows["pao"] = idx
+        elif joined == "PD-(L)1 | programmed death-ligand 1":
+            anchor_rows["pd"] = idx
+        elif joined == "PK | pharmacokinetics":
+            anchor_rows["pk"] = idx
+
+    assert anchor_rows == {
+        "pao": anchor_rows["pao"],
+        "pd": anchor_rows["pao"] + 1,
+        "pk": anchor_rows["pao"] + 2,
+    }
+
+    pd_row = rows[anchor_rows["pd"]]
+    ins_texts = [
+        "".join(t.text or "" for t in ins.findall(".//w:t", NS))
+        for ins in pd_row.findall(".//w:ins", NS)
+    ]
+    assert any("(L)" in text for text in ins_texts)
+    assert "programmed death-ligand 1" not in ins_texts
+
+
 def test_scrum130_merges_two_paragraph_intros_then_list_bullets(
     tmp_path: Path,
 ) -> None:
