@@ -4,8 +4,8 @@
     "email1-bladder": {
       "by_part": {
         "word/document.xml": {
-          "del": 43,
-          "ins": 57
+          "del": 42,
+          "ins": 56
         },
         "word/footer1.xml": {
           "del": 0,
@@ -26,8 +26,8 @@
       },
       "summary": {
         "document": {
-          "del": 43,
-          "ins": 57
+          "del": 42,
+          "ins": 56
         },
         "footers": {
           "del": 0,

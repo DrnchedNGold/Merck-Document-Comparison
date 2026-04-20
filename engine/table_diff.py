@@ -121,6 +121,38 @@ def _is_abbrev_like_key(key: str) -> bool:
     return bool(re.search(r"[A-Z]", key))
 
 
+def _canonical_abbrev_key(key: str) -> str:
+    """Uppercase alnum-only form for punctuation-insensitive glossary row identity."""
+
+    return "".join(ch for ch in key if ch.isalnum()).upper()
+
+
+def _abbrev_keys_should_align(left: str, right: str) -> bool:
+    """
+    True when two abbreviation-like row keys are the same entry with a minor edit.
+
+    This keeps rows like ``PD-L1`` -> ``PD-(L)1`` or ``PD-L1`` -> ``PD-L2``
+    aligned for inline cell diff instead of delete+insert row replacement.
+    """
+
+    if left == right:
+        return True
+    if not (_is_abbrev_like_key(left) and _is_abbrev_like_key(right)):
+        return False
+
+    canon_left = _canonical_abbrev_key(left)
+    canon_right = _canonical_abbrev_key(right)
+    if canon_left and canon_left == canon_right:
+        return True
+
+    basis_left = canon_left or left
+    basis_right = canon_right or right
+    return (
+        difflib.SequenceMatcher(None, basis_left, basis_right, autojunk=False).ratio()
+        >= 0.70
+    )
+
+
 def _is_abbreviation_definition_table(
     rows_o: list[list[BodyTableCell]],
     rows_r: list[list[BodyTableCell]],
@@ -198,7 +230,11 @@ def _align_table_rows(
                 ri = rem_r[k]
                 ko = key_o[oi]
                 kr = key_r[ri]
-                if _is_abbrev_like_key(ko) and _is_abbrev_like_key(kr) and ko != kr:
+                if (
+                    _is_abbrev_like_key(ko)
+                    and _is_abbrev_like_key(kr)
+                    and not _abbrev_keys_should_align(ko, kr)
+                ):
                     out.append((oi, None))
                 else:
                     out.append((oi, ri))
