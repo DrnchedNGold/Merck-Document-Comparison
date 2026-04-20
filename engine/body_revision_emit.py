@@ -291,6 +291,14 @@ def _try_build_track_changes_preserving_orig_runs(
         return None
     orig_cmp = _concat_paragraph_text(orig_para, config)
     rev_text = _concat_paragraph_text(rev_para, config)
+    if _numeric_grouping_only_change(orig_cmp, rev_text):
+        return _emit_char_level_tc_elements(
+            orig_cmp,
+            rev_text,
+            id_counter=id_counter,
+            author=author,
+            date_iso=date_iso,
+        )
     struct_ot = structured_orig_tokens_from_aligned_runs(aligned, orig_cmp)
     ot = tokenize_for_lcs(orig_cmp)
     rt = tokenize_for_lcs(rev_text)
@@ -331,21 +339,34 @@ def _try_build_track_changes_preserving_orig_runs(
             if chunk:
                 out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "replace":
-            out.extend(
-                _emit_preserving_replace_multitoken_bounded(
-                    aligned,
-                    ot,
-                    rt,
-                    i1,
-                    i2,
-                    j1,
-                    j2,
-                    struct_ot=struct_ot,
-                    id_counter=id_counter,
-                    author=author,
-                    date_iso=date_iso,
+            before_text = equal_span_surface(ot, i1, i2)
+            after_text = equal_span_surface(rt, j1, j2)
+            if _replace_span_prefers_char_level_track_changes(before_text, after_text):
+                out.extend(
+                    _emit_char_level_tc_elements(
+                        before_text,
+                        after_text,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
                 )
-            )
+            else:
+                out.extend(
+                    _emit_preserving_replace_multitoken_bounded(
+                        aligned,
+                        ot,
+                        rt,
+                        i1,
+                        i2,
+                        j1,
+                        j2,
+                        struct_ot=struct_ot,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                )
     return out
 
 
@@ -2330,6 +2351,83 @@ def _concat_tc_collect_emitted_text(elements: list[ET.Element]) -> str:
     return "".join(parts)
 
 
+def _numeric_grouping_only_change(a: str, b: str) -> bool:
+    """
+    True when *a* and *b* differ only by thousands separators in numeric text.
+
+    Example: ``5,003`` → ``5003`` should emit a small inline delete of `,`
+    rather than a full-token replace (token LCS treats ``5,003`` vs ``5003``
+    as multiple tokens vs one token and would otherwise emit full del+ins).
+    """
+
+    if a == b:
+        return False
+    if not (re.search(r"\d", a) and re.search(r"\d", b)):
+        return False
+    if "," not in a and "," not in b:
+        return False
+    return a.replace(",", "") == b.replace(",", "")
+
+
+def _emit_char_level_tc_elements(
+    a: str,
+    b: str,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> list[ET.Element]:
+    """Character-level ``w:r`` / ``w:del`` / ``w:ins`` children for *a* → *b* (SCRUM-141)."""
+
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    out: list[ET.Element] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            chunk = a[i1:i2]
+            if chunk:
+                out.extend(_w_runs_for_plain_text(chunk))
+        elif tag == "delete":
+            chunk = a[i1:i2]
+            if chunk:
+                out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
+        elif tag == "insert":
+            chunk = b[j1:j2]
+            if chunk:
+                out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
+        elif tag == "replace":
+            before = a[i1:i2]
+            after = b[j1:j2]
+            if before:
+                out.append(_w_del_segment(before, _next_id(id_counter), author, date_iso))
+            if after:
+                out.append(_w_ins_segment(after, _next_id(id_counter), author, date_iso))
+    return out
+
+
+def _replace_span_prefers_char_level_track_changes(before_text: str, after_text: str) -> bool:
+    """Same gates as :func:`_track_change_elements_for_concat_texts` ``replace`` branch (SCRUM-141)."""
+
+    if not (before_text and after_text):
+        return False
+    span_chars = len(before_text) + len(after_text)
+    span_ratio = difflib.SequenceMatcher(
+        None, before_text, after_text, autojunk=False
+    ).ratio()
+    lcp_len = 0
+    for ca, cb in zip(before_text, after_text, strict=False):
+        if ca != cb:
+            break
+        lcp_len += 1
+    digitish = bool(
+        re.search(r"\d", before_text) and re.search(r"\d", after_text)
+    )
+    return (
+        span_chars >= 16
+        and span_ratio >= 0.55
+        and (lcp_len >= 15 or digitish)
+    )
+
+
 def _concat_tc_emitted_numeric_corruption(
     orig_text: str, rev_text: str, emitted_concat: str
 ) -> bool:
@@ -2361,8 +2459,13 @@ def _track_change_elements_for_concat_texts(
 ) -> list[ET.Element]:
     """Word / punctuation / whitespace LCS on norm keys → surfaces in ``w:r`` / ``w:ins`` / ``w:del``.
 
-    Each ``replace`` opcode emits at most one ``w:del`` and one ``w:ins`` (joined token surfaces;
-    no nested diff inside the span).
+    Each ``replace`` opcode normally emits at most one ``w:del`` and one ``w:ins`` (joined token
+    surfaces; no nested diff inside that pair).
+
+    When a ``replace`` span is long and still **high-similarity** at the character level, the
+    span is expanded to **character-level** ``w:r`` / ``w:del`` / ``w:ins`` instead of one
+    monolithic delete+insert. That addresses token/heuristic opcode merging that otherwise pulls
+    unchanged text into a single ``replace`` (SCRUM-141 class defects).
 
     When token LCS looks like a large rewrite (low match ratio, many opcodes), returns a single
     ``w:del`` for *orig_text* and a single ``w:ins`` for *rev_text* instead of interleaved markup.
@@ -2370,6 +2473,15 @@ def _track_change_elements_for_concat_texts(
     Verbose fragmentation trace (stderr): set ``MDC_DEBUG_TC_CONCAT_FRAGMENTS=1``, or use the
     built-in example pair ``the name is kiran`` vs ``I am introduce as kiran`` (always traces).
     """
+
+    if _numeric_grouping_only_change(orig_text, rev_text):
+        return _emit_char_level_tc_elements(
+            orig_text,
+            rev_text,
+            id_counter=id_counter,
+            author=author,
+            date_iso=date_iso,
+        )
 
     orig_tokens = tokenize_for_lcs(orig_text)
     rev_tokens = tokenize_for_lcs(rev_text)
@@ -2504,9 +2616,19 @@ def _track_change_elements_for_concat_texts(
             if chunk:
                 out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "replace":
-            # Atomic replace only: one ``w:del`` + one ``w:ins`` (bypass any future replace branches).
             before_text = equal_span_surface(orig_tokens, i1, i2)
             after_text = equal_span_surface(rev_tokens, j1, j2)
+            if _replace_span_prefers_char_level_track_changes(before_text, after_text):
+                out.extend(
+                    _emit_char_level_tc_elements(
+                        before_text,
+                        after_text,
+                        id_counter=id_counter,
+                        author=author,
+                        date_iso=date_iso,
+                    )
+                )
+                continue
             if before_text:
                 out.append(_w_del_segment(before_text, _next_id(id_counter), author, date_iso))
             if after_text:
@@ -3599,6 +3721,8 @@ def _apply_table_cell_track_changes(
     rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
     word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
 
+    first_p = _ensure_tc_first_paragraph(tc_el)
+
     # For table cells, very low-overlap long text should render as full-line
     # replacement (one del line + one ins line) so Word balloons show the
     # entire deleted/inserted sentence clearly.
@@ -3615,6 +3739,9 @@ def _apply_table_cell_track_changes(
             _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
         ]
     else:
+        # Prefer the run-preserving TC builder when the current cell paragraph DOM
+        # aligns with the original IR. This prevents over-wide replace spans in
+        # common numeric/punctuation edits (SCRUM-141).
         new_kids = build_paragraph_track_change_elements(
             orig_para,
             rev_para,
@@ -3622,8 +3749,8 @@ def _apply_table_cell_track_changes(
             id_counter=id_counter,
             author=author,
             date_iso=date_iso,
+            source_p_el=first_p,
         )
-    first_p = _ensure_tc_first_paragraph(tc_el)
     _replace_p_content_preserving_p_pr(first_p, new_kids)
     for extra in _tc_direct_paragraph_elements(tc_el)[1:]:
         tc_el.remove(extra)
