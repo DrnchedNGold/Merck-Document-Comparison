@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
+from engine.docx_body_ingest import parse_docx_body_ir
 import engine.paragraph_alignment as paragraph_alignment
 from engine.paragraph_alignment import (
     ParagraphAlignment,
@@ -475,3 +478,26 @@ def test_repair_scrum121_merges_orig_only_then_rev_split_paragraphs() -> None:
         ParagraphAlignment(1, 1, revised_merge_end_exclusive=3),
         ParagraphAlignment(2, 3),
     ]
+
+
+def test_scrum138_cervical_merged_heading_block_pairs_split_rev_paragraphs() -> None:
+    """SCRUM-138: orig-only block then rev-only block → merge HPV/Env + Prevention heading pair."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    orig = parse_docx_body_ir(v1)
+    rev = parse_docx_body_ir(v2)
+    al = alignment_for_track_changes_emit(orig, rev, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    by_o = {a.original_paragraph_index: a for a in al if a.original_paragraph_index is not None}
+    assert by_o[64].revised_paragraph_index == 85
+    assert by_o[64].revised_merge_end_exclusive == 87
+    assert by_o[65].revised_paragraph_index == 87
+    assert by_o[65].revised_merge_end_exclusive == 95
+    assert by_o[66].revised_paragraph_index is None
+    assert by_o[67].revised_paragraph_index == 95
+    assert by_o[67].revised_merge_end_exclusive is None
+    assert by_o[68].revised_paragraph_index == 96
