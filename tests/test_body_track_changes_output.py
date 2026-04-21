@@ -1237,6 +1237,72 @@ def test_scrum140_bladder_abbreviation_row_keeps_partial_inline_change(
     assert "programmed death-ligand 1" not in ins_texts
 
 
+def test_scrum140b_bladder_body_disparities_paragraph_partial_inline_not_full_replace(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-140B: body paragraph with long shared opening — not one giant w:del/w:ins pair."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("bladder diversity sample docs not present")
+
+    shared_opening = (
+        "Despite the fact that bladder cancer incidence is higher among White individuals, "
+        "Black individuals in the US die of bladder cancer at higher rates than any other "
+        "racial or ethnic group."
+    )
+
+    out = tmp_path / "scrum140b_bladder_body_disparities_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    anchor = "Despite the fact that bladder cancer incidence is higher among White individuals"
+    target_p = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if anchor in _paragraph_track_visible_text(p)
+        ),
+        None,
+    )
+    assert target_p is not None
+
+    del_concat = _collect_del_text(target_p)
+    ins_concat = "".join(
+        t.text or "" for t in target_p.findall(".//w:ins//w:t", NS)
+    )
+    assert shared_opening not in del_concat, (
+        "stable opening must not appear inside w:del (full-paragraph-style replace)"
+    )
+    assert shared_opening not in ins_concat, (
+        "stable opening must not appear only as inserted text (full-paragraph-style replace)"
+    )
+    n_del = len(target_p.findall(".//w:del", NS))
+    n_ins = len(target_p.findall(".//w:ins", NS))
+    assert n_del >= 1 and n_ins >= 1, "expected some inline revisions"
+    assert n_del <= 24 and n_ins <= 24, (
+        f"expected localized edits, not one block replace; del={n_del} ins={n_ins}"
+    )
+    max_del_run = 0
+    for d in target_p.findall(".//w:del", NS):
+        chunk = _collect_del_text(d)
+        max_del_run = max(max_del_run, len(chunk))
+    assert max_del_run <= 120, (
+        f"single w:del span should not cover a huge clause; max_del_run={max_del_run}"
+    )
+    assert len(del_concat) <= 400, (
+        f"total deleted chars should be modest vs paragraph length; got {len(del_concat)}"
+    )
+
+
 def test_scrum130_merges_two_paragraph_intros_then_list_bullets(
     tmp_path: Path,
 ) -> None:
