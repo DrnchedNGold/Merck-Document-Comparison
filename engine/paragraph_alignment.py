@@ -318,6 +318,229 @@ def _repair_alignment_orig_para_rev_split_merge(
     return out
 
 
+def _merged_heading_prefix_before_colon(orig_txt: str) -> str | None:
+    """
+    Leading ``Heading:`` prefix for merged heading+body paragraphs, or None.
+
+    Used by :func:`_repair_alignment_orig_delete_block_then_rev_insert_merge` to
+    pair original one-paragraph subsections with revised split heading + body blocks
+    (SCRUM-138).
+    """
+
+    m = re.match(r"^\s*([A-Za-z][^:\n]{0,120}?):\s*\S", orig_txt)
+    return m.group(1).strip() if m else None
+
+
+def _is_prevention_section_heading_text(txt: str) -> bool:
+    tl = txt.strip().lower()
+    return (
+        "prevention" in tl
+        and "screening" in tl
+        and "diagnostic" in tl
+        and "strategies" in tl
+    )
+
+
+def _prevention_headings_match(orig_txt: str, rev_txt: str) -> bool:
+    """Loose match for ``Prevention, Screening…`` vs ``Differences in Prevention, Screening…``."""
+
+    if not _is_prevention_section_heading_text(orig_txt):
+        return False
+    return _is_prevention_section_heading_text(rev_txt)
+
+
+def _first_prevention_heading_index_in_rev_run(
+    rev_run: list[int],
+    r_ptr: int,
+    revised: BodyIR,
+    config: CompareConfig,
+) -> int | None:
+    """Smallest index ``t >= r_ptr`` into ``rev_run`` whose paragraph is a Prevention section heading."""
+
+    rb = revised.get("blocks", [])
+    for t in range(r_ptr, len(rev_run)):
+        rj = rev_run[t]
+        if rj >= len(rb) or rb[rj].get("type") != "paragraph":
+            return None
+        txt = _block_alignment_text(revised, rj, config)
+        if _is_prevention_section_heading_text(txt):
+            return t
+    return None
+
+
+def _try_repair_scrum138_orig_rev_block(
+    orig_run: list[int],
+    rev_run: list[int],
+    original: BodyIR,
+    revised: BodyIR,
+    config: CompareConfig,
+) -> list[ParagraphAlignment] | None:
+    """
+    Rewire a consecutive ``(oi, None)`` run followed by a consecutive ``(None, rj)``
+    run when the original side used merged heading+body paragraphs and the revised
+    side split them into headings and bodies (cervical diversity sample, SCRUM-138).
+
+    Returns ``None`` when the pattern does not apply or matching fails.
+    """
+
+    ob = original.get("blocks", [])
+    rb = revised.get("blocks", [])
+    if not orig_run or not rev_run:
+        return None
+
+    r_ptr = 0
+    out: list[ParagraphAlignment] = []
+    for orig_i in orig_run:
+        if orig_i >= len(ob) or ob[orig_i].get("type") != "paragraph":
+            return None
+        orig_txt = _block_alignment_text(original, orig_i, config)
+        prefix = _merged_heading_prefix_before_colon(orig_txt)
+
+        if prefix and prefix.lower() == "hpv infection":
+            if r_ptr + 1 >= len(rev_run):
+                return None
+            r0, r1 = rev_run[r_ptr], rev_run[r_ptr + 1]
+            if r1 >= len(rb) or rb[r0].get("type") != "paragraph" or rb[r1].get("type") != "paragraph":
+                return None
+            r0_txt = _block_alignment_text(revised, r0, config).strip()
+            if r0_txt.lower() != "hpv infection":
+                return None
+            merged = _block_alignment_text(revised, r0, config) + _block_alignment_text(
+                revised, r1, config
+            )
+            if not _split_merge_pair_aligns(orig_txt, merged):
+                return None
+            out.append(
+                ParagraphAlignment(
+                    orig_i,
+                    r0,
+                    revised_merge_end_exclusive=r1 + 1,
+                )
+            )
+            r_ptr += 2
+            continue
+
+        if prefix and prefix.lower() == "environmental factors":
+            if r_ptr >= len(rev_run):
+                return None
+            r0 = rev_run[r_ptr]
+            if r0 >= len(rb) or rb[r0].get("type") != "paragraph":
+                return None
+            if _block_alignment_text(revised, r0, config).strip().lower() != "environmental factors":
+                return None
+            stop_t = _first_prevention_heading_index_in_rev_run(rev_run, r_ptr, revised, config)
+            if stop_t is None or stop_t <= r_ptr:
+                return None
+            merged = "".join(
+                _block_alignment_text(revised, rev_run[t], config) for t in range(r_ptr, stop_t)
+            )
+            if not _split_merge_pair_aligns(orig_txt, merged):
+                return None
+            end_rj = rev_run[stop_t - 1]
+            out.append(
+                ParagraphAlignment(
+                    orig_i,
+                    rev_run[r_ptr],
+                    revised_merge_end_exclusive=end_rj + 1,
+                )
+            )
+            r_ptr = stop_t
+            continue
+
+        if prefix and "gene" in prefix.lower() and "polymorphism" in prefix.lower():
+            out.append(ParagraphAlignment(orig_i, None))
+            continue
+
+        if r_ptr >= len(rev_run):
+            out.append(ParagraphAlignment(orig_i, None))
+            continue
+
+        doc_rj = rev_run[r_ptr]
+        if doc_rj >= len(rb) or rb[doc_rj].get("type") != "paragraph":
+            return None
+        rev_txt = _block_alignment_text(revised, doc_rj, config)
+        if _prevention_headings_match(orig_txt, rev_txt):
+            out.append(ParagraphAlignment(orig_i, doc_rj))
+            r_ptr += 1
+            continue
+
+        return None
+
+    if r_ptr != len(rev_run):
+        return None
+    return out
+
+
+def _repair_alignment_orig_delete_block_then_rev_insert_merge(
+    alignment: list[ParagraphAlignment],
+    original: BodyIR,
+    revised: BodyIR,
+    config: CompareConfig,
+) -> list[ParagraphAlignment]:
+    """
+    When LCS emits **all** consecutive original-only rows then **all** consecutive
+    revised-only rows, :func:`_repair_alignment_orig_para_rev_split_merge` cannot
+    fire (it requires an ``(oi, None)`` + ``(None, r…)`` chain **before** the next
+    matched original). Rewire merged heading+body originals to split revised
+    paragraphs (SCRUM-138).
+    """
+
+    if not alignment:
+        return alignment
+    out: list[ParagraphAlignment] = []
+    i = 0
+    n = len(alignment)
+    while i < n:
+        oi0 = alignment[i].original_paragraph_index
+        rj0 = alignment[i].revised_paragraph_index
+        if oi0 is None or rj0 is not None:
+            out.append(alignment[i])
+            i += 1
+            continue
+        j = i
+        orig_run: list[int] = []
+        while j < n:
+            a = alignment[j]
+            oi, rj = a.original_paragraph_index, a.revised_paragraph_index
+            if oi is None or rj is not None:
+                break
+            if not orig_run:
+                orig_run.append(oi)
+            elif orig_run[-1] + 1 != oi:
+                break
+            else:
+                orig_run.append(oi)
+            j += 1
+        if j >= n or alignment[j].original_paragraph_index is not None:
+            out.extend(alignment[i:j])
+            i = j
+            continue
+        k = j
+        rev_run: list[int] = []
+        while k < n:
+            a = alignment[k]
+            oi, rj = a.original_paragraph_index, a.revised_paragraph_index
+            if oi is not None or rj is None:
+                break
+            if not rev_run:
+                rev_run.append(rj)
+            elif rev_run[-1] + 1 != rj:
+                break
+            else:
+                rev_run.append(rj)
+            k += 1
+        repaired = _try_repair_scrum138_orig_rev_block(
+            orig_run, rev_run, original, revised, config
+        )
+        if repaired is not None:
+            out.extend(repaired)
+            i = k
+        else:
+            out.extend(alignment[i:k])
+            i = k
+    return out
+
+
 def _toc_section_prefix_for_alignment(txt: str) -> str | None:
     """Leading numbered section id (``1``, ``1.2.1``, …) or None if not TOC-shaped."""
 
@@ -1649,6 +1872,7 @@ def alignment_for_track_changes_emit(
         al = align_paragraphs(original, revised, config)
         al = _repair_alignment_orig_table_rev_paras_then_rev_table(al, original, revised)
         al = _repair_alignment_orig_para_rev_split_merge(al, original, revised, config)
+        al = _repair_alignment_orig_delete_block_then_rev_insert_merge(al, original, revised, config)
         _maybe_diagnose_unmatched_rev_repair_gates(
             al, original, revised, config, strategy_tag="lcs_block_count_mismatch"
         )
@@ -1668,6 +1892,7 @@ def alignment_for_track_changes_emit(
     al = align_paragraphs(original, revised, config)
     al = _repair_alignment_orig_table_rev_paras_then_rev_table(al, original, revised)
     al = _repair_alignment_orig_para_rev_split_merge(al, original, revised, config)
+    al = _repair_alignment_orig_delete_block_then_rev_insert_merge(al, original, revised, config)
     _maybe_diagnose_unmatched_rev_repair_gates(
         al, original, revised, config, strategy_tag="lcs_type_mismatch_at_slot"
     )
