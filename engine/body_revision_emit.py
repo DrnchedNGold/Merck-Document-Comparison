@@ -3347,7 +3347,14 @@ def _apply_matched_table_track_changes(
             cell_alignment = [(c, c) for c in range(len(row_o))]
 
         for oc, rc in cell_alignment:
-            cell_idx = rc if rc is not None else (oc if oc is not None else 0)
+            # Map edits onto the **original** row's w:tc list: use orig index `oc` so
+            # track changes sit on the correct column when a column is removed
+            # (e.g. Goal | MK → merged MK).
+            cell_idx = (
+                oc
+                if oc is not None
+                else (rc if rc is not None else 0)
+            )
             if cell_idx >= len(tcs):
                 if cell_idx < len(rev_tcs):
                     new_tc = copy.deepcopy(rev_tcs[cell_idx])

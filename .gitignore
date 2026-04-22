@@ -42,6 +42,10 @@ golden-refresh-ib-tmp/
 tmp/
 tmp-*/
 
+# Ad-hoc compare outputs from local desktop/CLI runs (not part of the corpus)
+sample-docs/**/compare_v*.docx
+parse_xml.py
+
 # Local-only files not to push
 AGENTS.md
 .prettierrc
