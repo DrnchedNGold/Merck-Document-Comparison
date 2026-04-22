@@ -3300,21 +3300,18 @@ def _apply_matched_table_track_changes(
     rows_r = rev_table.get("rows", [])
     is_abbrev_tbl = _is_abbreviation_definition_table(rows_o, rows_r, config)
 
-    # Keep legacy behavior for non-target tables to avoid broad output drift.
-    if not is_abbrev_tbl and _table_shape(orig_table) != _table_shape(rev_table):
-        if revised_tbl_el is not None:
-            _replace_body_child_element(
-                container, tbl_el, copy.deepcopy(revised_tbl_el)
-            )
-        return
-
     tr_els = _tbl_tr_elements(tbl_el)
     rev_tr_els = _tbl_tr_elements(revised_tbl_el) if revised_tbl_el is not None else []
 
-    if not is_abbrev_tbl:
-        row_alignment = [(i, i) for i in range(min(len(rows_o), len(rows_r)))]
-    else:
+    # SCRUM-143: When column widths per row or row counts differ, still align rows/cells
+    # and emit per-cell track changes. Replacing the whole w:tbl with the revised
+    # package copy hid table-level redline for sponsor tables (e.g. goals-by-race).
+    if is_abbrev_tbl or _table_shape(orig_table) != _table_shape(rev_table) or len(
+        rows_o
+    ) != len(rows_r):
         row_alignment = _align_table_rows(rows_o, rows_r, config)
+    else:
+        row_alignment = [(i, i) for i in range(len(rows_o))]
     out_row = 0
     for oi, ri in row_alignment:
         row_o = rows_o[oi] if oi is not None else []
@@ -3344,10 +3341,10 @@ def _apply_matched_table_track_changes(
             else []
         )
 
-        if not is_abbrev_tbl:
-            cell_alignment = [(c, c) for c in range(min(len(row_o), len(row_r)))]
-        else:
+        if is_abbrev_tbl or len(row_o) != len(row_r):
             cell_alignment = _align_row_cells(row_o, row_r, config)
+        else:
+            cell_alignment = [(c, c) for c in range(len(row_o))]
 
         for oc, rc in cell_alignment:
             cell_idx = rc if rc is not None else (oc if oc is not None else 0)

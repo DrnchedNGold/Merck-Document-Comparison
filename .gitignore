@@ -33,6 +33,11 @@ tested_output/
 # Golden baseline refresh script output (.docx per pair)
 golden-corpus-output/
 
+# Ad-hoc golden harness / refresh temp dirs (local only; not committed baselines)
+golden-corpus-out-*/
+golden-corpus-output-tmp*/
+golden-refresh-ib-tmp/
+
 # Local scratch / temp output
 tmp/
 tmp-*/
@@ -40,3 +45,10 @@ tmp-*/
 # Local-only files not to push
 AGENTS.md
 .prettierrc
+
+
+.coverage
+
+.pytest_full_run.log
+.pytest_full_run2.log
+coverage.xml

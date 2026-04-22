@@ -1303,6 +1303,44 @@ def test_scrum140b_bladder_body_disparities_paragraph_partial_inline_not_full_re
     )
 
 
+def test_scrum143_bladder_table2_shape_mismatch_has_cell_level_track_changes(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-143: goals-by-race table with differing w:tbl shape must not be a silent v2 replace."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("bladder diversity sample docs not present")
+
+    out = tmp_path / "scrum143_bladder_table2_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    goals_tbl = next(
+        (
+            tbl
+            for tbl in root.findall(".//w:tbl", NS)
+            if "Distribution of New" in _collect_t_text(tbl)
+        ),
+        None,
+    )
+    assert goals_tbl is not None, "expected US distribution / goals table in output"
+    n_ins = len(goals_tbl.findall(".//w:ins", NS))
+    n_del = len(goals_tbl.findall(".//w:del", NS))
+    assert n_ins >= 1 and n_del >= 1, (
+        f"Table 2 must show cell-level track changes, not a bare v2 w:tbl; ins={n_ins} del={n_del}"
+    )
+    assert n_ins + n_del >= 8, (
+        f"expected substantial per-cell redline; ins={n_ins} del={n_del}"
+    )
+
+
 def test_scrum130_merges_two_paragraph_intros_then_list_bullets(
     tmp_path: Path,
 ) -> None:
