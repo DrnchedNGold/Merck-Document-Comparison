@@ -1,6 +1,6 @@
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
 from engine.contracts import validate_diff_ops
-from engine.table_diff import diff_table_blocks
+from engine.table_diff import _align_row_cells, diff_table_blocks
 
 
 def _cell(text: str) -> dict:
@@ -185,3 +185,83 @@ def test_table_diff_two_by_two_row_major_cell_diffs() -> None:
         }
     ]
     assert validate_diff_ops(ops) == []
+
+
+def test_bladder_merged_header_row_pairs_mk_not_goal() -> None:
+    row_o = [
+        _cell(""),
+        _cell("Distribution of New la/mUC"),
+        _cell("Goal Percentages"),
+        _cell("MK‑2870-031\n(N=690)"),
+    ]
+    row_r = [
+        _cell(""),
+        _cell("Distribution of New la/mUC"),
+        _cell("MK‑2870-031\n(N=590)"),
+    ]
+    al = _align_row_cells(row_o, row_r, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert al == [(0, 0), (1, 1), (2, None), (3, 2)]
+
+
+def test_bladder_goal_percent_delete_only_when_enrollment_matches() -> None:
+    row_o = [
+        _cell("Asian"),
+        _cell("2.7%"),
+        _cell("3%"),
+        _cell("4"),
+    ]
+    row_r = [_cell("Asian"), _cell("2.7%"), _cell("4")]
+    al = _align_row_cells(row_o, row_r, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert al == [(0, 0), (1, 1), (2, None), (3, 2)]
+
+    row_b = [
+        _cell("Black or African Descent"),
+        _cell("9.4%"),
+        _cell("9%"),
+        _cell("12"),
+    ]
+    row_br = [_cell("Black or African Descent"), _cell("9.4%"), _cell("12")]
+    assert _align_row_cells(row_b, row_br, DEFAULT_WORD_LIKE_COMPARE_CONFIG) == [
+        (0, 0),
+        (1, 1),
+        (2, None),
+        (3, 2),
+    ]
+
+
+def test_bladder_ai_an_goal_delete_only_mk_replaces() -> None:
+    """1% is delete-only in Goal column; v2’s ``2`` pairs with old enrollment 1, not 1%."""
+
+    row_o = [
+        _cell("AI/AN"),
+        _cell("0.4%"),
+        _cell("1%"),
+        _cell("1"),
+    ]
+    row_r = [_cell("AI/AN"), _cell("0.4%"), _cell("2")]
+    al = _align_row_cells(row_o, row_r, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert al == [(0, 0), (1, 1), (2, None), (3, 2)]
+
+
+def test_bladder_white_goal_delete_119_replaces_103() -> None:
+    row_o = [
+        _cell("White"),
+        _cell("87.4%"),
+        _cell("87%"),
+        _cell("119"),
+    ]
+    row_r = [_cell("White"), _cell("87.4%"), _cell("103")]
+    al = _align_row_cells(row_o, row_r, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert al == [(0, 0), (1, 1), (2, None), (3, 2)]
+
+
+def test_bladder_us_total_three_two_mapping() -> None:
+    row_o = [
+        _cell("US Total Allocation"),
+        _cell(""),
+        _cell(""),
+        _cell("136"),
+    ]
+    row_r = [_cell("US Total Allocation"), _cell("N/A"), _cell("121")]
+    al = _align_row_cells(row_o, row_r, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    assert al == [(0, 0), (1, 1), (2, None), (3, 2)]

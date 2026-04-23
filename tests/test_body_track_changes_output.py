@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+import engine.body_revision_emit as body_revision_emit
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
 from engine.body_revision_emit import (
     _build_toc_matched_line_track_change_elements,
@@ -48,6 +49,26 @@ def _collect_del_text(container: ET.Element) -> str:
     return "".join(parts)
 
 
+def _table_cell(text: str) -> dict:
+    return {
+        "paragraphs": [
+            {"type": "paragraph", "id": "cell-p", "runs": [{"text": text}]},
+        ]
+    }
+
+
+def _w_tbl_with_row(cell_texts: list[str]) -> ET.Element:
+    tbl = ET.Element(f"{{{WORD_NS}}}tbl")
+    tr = ET.SubElement(tbl, f"{{{WORD_NS}}}tr")
+    for text in cell_texts:
+        tc = ET.SubElement(tr, f"{{{WORD_NS}}}tc")
+        p = ET.SubElement(tc, f"{{{WORD_NS}}}p")
+        r = ET.SubElement(p, f"{{{WORD_NS}}}r")
+        t = ET.SubElement(r, f"{{{WORD_NS}}}t")
+        t.text = text
+    return tbl
+
+
 def _body_block_sequence(body: ET.Element) -> list[tuple[str, str]]:
     seq: list[tuple[str, str]] = []
     for ch in list(body):
@@ -59,6 +80,38 @@ def _body_block_sequence(body: ET.Element) -> list[tuple[str, str]]:
         elif ln == "ins" and ch.find("w:tbl", NS) is not None:
             seq.append(("tbl", ""))
     return seq
+
+
+def test_table_cell_insert_with_sparse_revised_index_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SCRUM-143: a cloned revised cell may be the direct target when original cells are sparse."""
+
+    monkeypatch.setattr(body_revision_emit, "_align_table_rows", lambda *_: [(0, 0)])
+    monkeypatch.setattr(body_revision_emit, "_align_row_cells", lambda *_: [(None, 2)])
+
+    body = ET.Element(f"{{{WORD_NS}}}body")
+    orig_tbl_el = _w_tbl_with_row([])
+    revised_tbl_el = _w_tbl_with_row(["A", "B", "C"])
+
+    body_revision_emit._apply_matched_table_track_changes(
+        body,
+        orig_tbl_el,
+        {"type": "table", "id": "orig", "rows": [[]]},
+        {
+            "type": "table",
+            "id": "rev",
+            "rows": [[_table_cell("A"), _table_cell("B"), _table_cell("C")]],
+        },
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        [0],
+        "Test",
+        "2026-03-28T00:00:00Z",
+        revised_tbl_el=revised_tbl_el,
+    )
+
+    assert len(orig_tbl_el.findall(".//w:tc", NS)) == 1
+    assert _collect_t_text(orig_tbl_el.findall(".//w:ins", NS)[0]) == "C"
 
 
 def test_build_paragraph_track_change_insert_has_ins_with_t() -> None:
@@ -1300,6 +1353,44 @@ def test_scrum140b_bladder_body_disparities_paragraph_partial_inline_not_full_re
     )
     assert len(del_concat) <= 400, (
         f"total deleted chars should be modest vs paragraph length; got {len(del_concat)}"
+    )
+
+
+def test_scrum143_bladder_table2_shape_mismatch_has_cell_level_track_changes(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-143: goals-by-race table with differing w:tbl shape must not be a silent v2 replace."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("bladder diversity sample docs not present")
+
+    out = tmp_path / "scrum143_bladder_table2_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    goals_tbl = next(
+        (
+            tbl
+            for tbl in root.findall(".//w:tbl", NS)
+            if "Distribution of New" in _collect_t_text(tbl)
+        ),
+        None,
+    )
+    assert goals_tbl is not None, "expected US distribution / goals table in output"
+    n_ins = len(goals_tbl.findall(".//w:ins", NS))
+    n_del = len(goals_tbl.findall(".//w:del", NS))
+    assert n_ins >= 1 and n_del >= 1, (
+        f"Table 2 must show cell-level track changes, not a bare v2 w:tbl; ins={n_ins} del={n_del}"
+    )
+    assert n_ins + n_del >= 8, (
+        f"expected substantial per-cell redline; ins={n_ins} del={n_del}"
     )
 
 

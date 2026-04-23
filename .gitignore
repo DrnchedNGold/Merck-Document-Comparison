@@ -33,10 +33,27 @@ tested_output/
 # Golden baseline refresh script output (.docx per pair)
 golden-corpus-output/
 
+# Ad-hoc golden harness / refresh temp dirs (local only; not committed baselines)
+golden-corpus-out-*/
+golden-corpus-output-tmp*/
+golden-refresh-ib-tmp/
+
 # Local scratch / temp output
 tmp/
 tmp-*/
 
+# Ad-hoc compare outputs from local desktop/CLI runs (not part of the corpus)
+# e.g. compare_v5.docx, compare_v7.docx, compare_out.docx, … under sample-docs
+sample-docs/**/compare_*.docx
+parse_xml.py
+
 # Local-only files not to push
 AGENTS.md
 .prettierrc
+
+
+.coverage
+
+.pytest_full_run.log
+.pytest_full_run2.log
+coverage.xml
