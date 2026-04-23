@@ -371,6 +371,34 @@ def test_alignment_length_weak_prefix_expansion_pairs_with_insert_above() -> Non
     assert (1, 2) in pairs, pairs
 
 
+def test_alignment_punctuation_flexible_prefix_pairs_shortened_sentence() -> None:
+    """SCRUM-144: shared opening with punctuation boundary change must align inline."""
+
+    original = {
+        "version": 1,
+        "blocks": [
+            _p("5 Status of Meeting Enrollment Goals"),
+            _p(
+                "Not applicable, as this is the initial Diversity Plan for la/mUC in "
+                "the sacituzumab tirumotecan program."
+            ),
+            _p("Next section."),
+        ],
+    }
+    revised = {
+        "version": 1,
+        "blocks": [
+            _p("5 Status of Meeting Enrollment Goals"),
+            _p("Not applicable."),
+            _p("Next section."),
+        ],
+    }
+
+    alignment = align_paragraphs(original, revised, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    pairs = [(x.original_paragraph_index, x.revised_paragraph_index) for x in alignment]
+    assert pairs == [(0, 0), (1, 1), (2, 2)]
+
+
 def test_alignment_fuzzy_pairs_edited_paragraph_when_signatures_differ() -> None:
     """Edited same sentence must align (not delete+insert whole block) when counts differ."""
     s1 = "The study will enroll 100 participants at three sites."

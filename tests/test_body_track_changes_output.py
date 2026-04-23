@@ -1356,6 +1356,49 @@ def test_scrum140b_bladder_body_disparities_paragraph_partial_inline_not_full_re
     )
 
 
+def test_scrum144_bladder_enrollment_goals_shortening_stays_inline(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-144: preserve the shared sentence stem inline instead of delete+insert blocks."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-bladder-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("bladder diversity sample docs not present")
+
+    out = tmp_path / "scrum144_bladder_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    paras = body.findall("w:p", NS)
+
+    heading_idx = next(
+        i
+        for i, p in enumerate(paras)
+        if _collect_t_text(p).strip() == "STATUS OF MEETING ENROLLMENT GOALS"
+    )
+    target_p = paras[heading_idx + 1]
+
+    plain = _collect_t_text(target_p)
+    deleted = _collect_del_text(target_p)
+    ins_chunks = [_collect_t_text(ins) for ins in target_p.findall(".//w:ins", NS)]
+
+    assert plain.strip() == "Not applicable."
+    assert "Not applicable" not in deleted
+    assert "as this is the initial Diversity Plan for la/mUC" in deleted
+    assert not ins_chunks
+
+    next_plain = _collect_t_text(paras[heading_idx + 2]).strip()
+    assert next_plain != "Not applicable."
+
+
 def test_scrum143_bladder_table2_shape_mismatch_has_cell_level_track_changes(
     tmp_path: Path,
 ) -> None:
