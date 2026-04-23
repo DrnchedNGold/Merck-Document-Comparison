@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+import engine.body_revision_emit as body_revision_emit
 from engine import DEFAULT_WORD_LIKE_COMPARE_CONFIG
 from engine.body_revision_emit import (
     _build_toc_matched_line_track_change_elements,
@@ -48,6 +49,26 @@ def _collect_del_text(container: ET.Element) -> str:
     return "".join(parts)
 
 
+def _table_cell(text: str) -> dict:
+    return {
+        "paragraphs": [
+            {"type": "paragraph", "id": "cell-p", "runs": [{"text": text}]},
+        ]
+    }
+
+
+def _w_tbl_with_row(cell_texts: list[str]) -> ET.Element:
+    tbl = ET.Element(f"{{{WORD_NS}}}tbl")
+    tr = ET.SubElement(tbl, f"{{{WORD_NS}}}tr")
+    for text in cell_texts:
+        tc = ET.SubElement(tr, f"{{{WORD_NS}}}tc")
+        p = ET.SubElement(tc, f"{{{WORD_NS}}}p")
+        r = ET.SubElement(p, f"{{{WORD_NS}}}r")
+        t = ET.SubElement(r, f"{{{WORD_NS}}}t")
+        t.text = text
+    return tbl
+
+
 def _body_block_sequence(body: ET.Element) -> list[tuple[str, str]]:
     seq: list[tuple[str, str]] = []
     for ch in list(body):
@@ -59,6 +80,38 @@ def _body_block_sequence(body: ET.Element) -> list[tuple[str, str]]:
         elif ln == "ins" and ch.find("w:tbl", NS) is not None:
             seq.append(("tbl", ""))
     return seq
+
+
+def test_table_cell_insert_with_sparse_revised_index_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SCRUM-143: a cloned revised cell may be the direct target when original cells are sparse."""
+
+    monkeypatch.setattr(body_revision_emit, "_align_table_rows", lambda *_: [(0, 0)])
+    monkeypatch.setattr(body_revision_emit, "_align_row_cells", lambda *_: [(None, 2)])
+
+    body = ET.Element(f"{{{WORD_NS}}}body")
+    orig_tbl_el = _w_tbl_with_row([])
+    revised_tbl_el = _w_tbl_with_row(["A", "B", "C"])
+
+    body_revision_emit._apply_matched_table_track_changes(
+        body,
+        orig_tbl_el,
+        {"type": "table", "id": "orig", "rows": [[]]},
+        {
+            "type": "table",
+            "id": "rev",
+            "rows": [[_table_cell("A"), _table_cell("B"), _table_cell("C")]],
+        },
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        [0],
+        "Test",
+        "2026-03-28T00:00:00Z",
+        revised_tbl_el=revised_tbl_el,
+    )
+
+    assert len(orig_tbl_el.findall(".//w:tc", NS)) == 1
+    assert _collect_t_text(orig_tbl_el.findall(".//w:ins", NS)[0]) == "C"
 
 
 def test_build_paragraph_track_change_insert_has_ins_with_t() -> None:

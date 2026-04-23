@@ -3361,9 +3361,11 @@ def _apply_matched_table_track_changes(
                     _ensure_inserted_table_cell_shading(new_tc)
                     tr_el.append(new_tc)
                     tcs.append(new_tc)
+                    tc_el = new_tc
                 else:
                     continue
-            tc_el = tcs[cell_idx]
+            else:
+                tc_el = tcs[cell_idx]
             orig_cell = row_o[oc] if oc is not None else _empty_table_cell()
             rev_cell = row_r[rc] if rc is not None else _empty_table_cell()
             _apply_table_cell_track_changes(

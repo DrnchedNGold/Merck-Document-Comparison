@@ -42,8 +42,8 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 384,
-          "ins": 517
+          "del": 381,
+          "ins": 513
         },
         "word/footer1.xml": {
           "del": 0,
@@ -56,8 +56,8 @@
       },
       "summary": {
         "document": {
-          "del": 384,
-          "ins": 517
+          "del": 381,
+          "ins": 513
         },
         "footers": {
           "del": 0,
@@ -118,8 +118,8 @@
     "email3-ib-10-11": {
       "by_part": {
         "word/document.xml": {
-          "del": 8126,
-          "ins": 13105
+          "del": 8984,
+          "ins": 13983
         },
         "word/footer1.xml": {
           "del": 0,
@@ -360,8 +360,8 @@
       },
       "summary": {
         "document": {
-          "del": 8126,
-          "ins": 13105
+          "del": 8984,
+          "ins": 13983
         },
         "footers": {
           "del": 2,
@@ -376,8 +376,8 @@
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 6470,
-          "ins": 17706
+          "del": 5797,
+          "ins": 16956
         },
         "word/footer1.xml": {
           "del": 2,
@@ -602,8 +602,8 @@
       },
       "summary": {
         "document": {
-          "del": 6470,
-          "ins": 17706
+          "del": 5797,
+          "ins": 16956
         },
         "footers": {
           "del": 4,
@@ -618,8 +618,8 @@
     "email3-protocol-1026": {
       "by_part": {
         "word/document.xml": {
-          "del": 1008,
-          "ins": 1543
+          "del": 998,
+          "ins": 1522
         },
         "word/footer1.xml": {
           "del": 0,
@@ -648,8 +648,8 @@
       },
       "summary": {
         "document": {
-          "del": 1008,
-          "ins": 1543
+          "del": 998,
+          "ins": 1522
         },
         "footers": {
           "del": 2,
@@ -664,8 +664,8 @@
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 1055,
-          "ins": 1848
+          "del": 1022,
+          "ins": 1840
         },
         "word/footer1.xml": {
           "del": 0,
@@ -758,8 +758,8 @@
       },
       "summary": {
         "document": {
-          "del": 1055,
-          "ins": 1848
+          "del": 1022,
+          "ins": 1840
         },
         "footers": {
           "del": 0,
