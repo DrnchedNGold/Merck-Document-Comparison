@@ -43,7 +43,8 @@ tmp/
 tmp-*/
 
 # Ad-hoc compare outputs from local desktop/CLI runs (not part of the corpus)
-sample-docs/**/compare_v*.docx
+# e.g. compare_v5.docx, compare_v7.docx, compare_out.docx, … under sample-docs
+sample-docs/**/compare_*.docx
 parse_xml.py
 
 # Local-only files not to push
