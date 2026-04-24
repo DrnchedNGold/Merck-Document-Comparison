@@ -72,7 +72,7 @@
     "email2-v940": {
       "by_part": {
         "word/document.xml": {
-          "del": 21,
+          "del": 20,
           "ins": 15
         },
         "word/footer1.xml": {
@@ -102,7 +102,7 @@
       },
       "summary": {
         "document": {
-          "del": 21,
+          "del": 20,
           "ins": 15
         },
         "footers": {
