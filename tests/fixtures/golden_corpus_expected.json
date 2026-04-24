@@ -664,7 +664,7 @@
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 1022,
+          "del": 1021,
           "ins": 1840
         },
         "word/footer1.xml": {
@@ -758,7 +758,7 @@
       },
       "summary": {
         "document": {
-          "del": 1022,
+          "del": 1021,
           "ins": 1840
         },
         "footers": {
