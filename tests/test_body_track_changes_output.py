@@ -69,6 +69,20 @@ def _w_tbl_with_row(cell_texts: list[str]) -> ET.Element:
     return tbl
 
 
+def _w_p_with_numpr(text: str, *, num_id: str, ilvl: str = "0") -> ET.Element:
+    p = ET.Element(f"{{{WORD_NS}}}p")
+    ppr = ET.SubElement(p, f"{{{WORD_NS}}}pPr")
+    numpr = ET.SubElement(ppr, f"{{{WORD_NS}}}numPr")
+    ilvl_el = ET.SubElement(numpr, f"{{{WORD_NS}}}ilvl")
+    ilvl_el.set(f"{{{WORD_NS}}}val", ilvl)
+    numid_el = ET.SubElement(numpr, f"{{{WORD_NS}}}numId")
+    numid_el.set(f"{{{WORD_NS}}}val", num_id)
+    r = ET.SubElement(p, f"{{{WORD_NS}}}r")
+    t = ET.SubElement(r, f"{{{WORD_NS}}}t")
+    t.text = text
+    return p
+
+
 def _body_block_sequence(body: ET.Element) -> list[tuple[str, str]]:
     seq: list[tuple[str, str]] = []
     for ch in list(body):
@@ -112,6 +126,92 @@ def test_table_cell_insert_with_sparse_revised_index_does_not_crash(
 
     assert len(orig_tbl_el.findall(".//w:tc", NS)) == 1
     assert _collect_t_text(orig_tbl_el.findall(".//w:ins", NS)[0]) == "C"
+
+
+def test_table_cell_bullet_paragraphs_preserve_numpr_and_do_not_collapse_to_single_para() -> None:
+    """Bullet list rows inside one table cell keep paragraph-level numbering metadata."""
+
+    tc = ET.Element(f"{{{WORD_NS}}}tc")
+    tc.append(_w_p_with_numpr("Updated total number of participants.", num_id="9"))
+    tc.append(_w_p_with_numpr("Updated list of participating countries.", num_id="9"))
+
+    revised_tc = ET.Element(f"{{{WORD_NS}}}tc")
+    revised_tc.append(_w_p_with_numpr("Updated total number of participants.", num_id="9"))
+    revised_tc.append(_w_p_with_numpr("Updated list of participating trial countries.", num_id="9"))
+
+    orig_cell = {
+        "paragraphs": [
+            {"type": "paragraph", "id": "c0p0", "runs": [{"text": "Updated total number of participants."}]},
+            {"type": "paragraph", "id": "c0p1", "runs": [{"text": "Updated list of participating countries."}]},
+        ]
+    }
+    rev_cell = {
+        "paragraphs": [
+            {"type": "paragraph", "id": "c0p0", "runs": [{"text": "Updated total number of participants."}]},
+            {"type": "paragraph", "id": "c0p1", "runs": [{"text": "Updated list of participating trial countries."}]},
+        ]
+    }
+
+    body_revision_emit._apply_table_cell_track_changes(
+        tc,
+        orig_cell,
+        rev_cell,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        [0],
+        "Test",
+        "2026-04-23T00:00:00Z",
+        revised_tc_el=revised_tc,
+    )
+
+    paras = [c for c in tc if _local_name(c.tag) == "p"]
+    assert len(paras) == 2
+    for p in paras:
+        num_id = p.find("w:pPr/w:numPr/w:numId", NS)
+        assert num_id is not None
+        assert num_id.get(f"{{{WORD_NS}}}val") == "9"
+
+
+def test_table_cell_numbered_paragraphs_keep_numbered_numpr() -> None:
+    """Control: true numbered list metadata should remain unchanged in table cells."""
+
+    tc = ET.Element(f"{{{WORD_NS}}}tc")
+    tc.append(_w_p_with_numpr("1) Numbered item one", num_id="42"))
+    tc.append(_w_p_with_numpr("2) Numbered item two", num_id="42"))
+
+    revised_tc = ET.Element(f"{{{WORD_NS}}}tc")
+    revised_tc.append(_w_p_with_numpr("1) Numbered item one", num_id="42"))
+    revised_tc.append(_w_p_with_numpr("2) Numbered list item two", num_id="42"))
+
+    orig_cell = {
+        "paragraphs": [
+            {"type": "paragraph", "id": "n0", "runs": [{"text": "1) Numbered item one"}]},
+            {"type": "paragraph", "id": "n1", "runs": [{"text": "2) Numbered item two"}]},
+        ]
+    }
+    rev_cell = {
+        "paragraphs": [
+            {"type": "paragraph", "id": "n0", "runs": [{"text": "1) Numbered item one"}]},
+            {"type": "paragraph", "id": "n1", "runs": [{"text": "2) Numbered list item two"}]},
+        ]
+    }
+
+    body_revision_emit._apply_table_cell_track_changes(
+        tc,
+        orig_cell,
+        rev_cell,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        [0],
+        "Test",
+        "2026-04-23T00:00:00Z",
+        revised_tc_el=revised_tc,
+    )
+
+    paras = [c for c in tc if _local_name(c.tag) == "p"]
+    assert len(paras) == 2
+    for p in paras:
+        num_id = p.find("w:pPr/w:numPr/w:numId", NS)
+        assert num_id is not None
+        assert num_id.get(f"{{{WORD_NS}}}val") == "42"
 
 
 def test_build_paragraph_track_change_insert_has_ins_with_t() -> None:
@@ -1820,6 +1920,36 @@ def test_write_docx_copy_with_part_replacements_overrides(tmp_path: Path) -> Non
     with zipfile.ZipFile(dst, "r") as zf:
         assert b"<new/>" in zf.read("word/document.xml")
         assert zf.read("word/styles.xml") == b"<keep/>"
+
+
+def test_emit_package_replaces_numbering_part_with_revised_bytes(tmp_path: Path) -> None:
+    """When both inputs carry numbering.xml, output should keep revised numbering defs."""
+
+    body = "<w:p><w:r><w:t>Same</w:t></w:r></w:p>"
+    orig = _minimal_docx(tmp_path, body, "orig_num.docx")
+    rev = _minimal_docx(tmp_path, body, "rev_num.docx")
+
+    orig_numbering = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>"""
+    rev_numbering = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="9"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>
+  <w:num w:numId="9"><w:abstractNumId w:val="9"/></w:num>
+</w:numbering>"""
+
+    with zipfile.ZipFile(orig, "a") as zf:
+        zf.writestr("word/numbering.xml", orig_numbering)
+    with zipfile.ZipFile(rev, "a") as zf:
+        zf.writestr("word/numbering.xml", rev_numbering)
+
+    out = tmp_path / "out_num.docx"
+    emit_docx_with_package_track_changes(orig, rev, out, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        assert zf.read("word/numbering.xml") == rev_numbering
 
 
 def test_emit_inserts_new_paragraph_only_in_revised(tmp_path: Path) -> None:
