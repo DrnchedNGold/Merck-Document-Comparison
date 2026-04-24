@@ -3418,6 +3418,7 @@ def _apply_matched_table_track_changes(
                 author,
                 date_iso,
                 major_sentence_mode=is_abbrev_tbl,
+                revised_tc_el=rev_tcs[rc] if rc is not None and rc < len(rev_tcs) else None,
             )
         out_row += 1
 
@@ -3729,6 +3730,78 @@ def _empty_table_cell() -> dict:
     return {"paragraphs": []}
 
 
+def _cell_paragraphs(cell: dict) -> list[BodyParagraph]:
+    paras = cell.get("paragraphs", [])
+    out: list[BodyParagraph] = []
+    for para in paras:
+        if isinstance(para, dict) and para.get("type") == "paragraph":
+            out.append(para)  # type: ignore[arg-type]
+    return out
+
+
+def _cell_paragraph_text(para: BodyParagraph) -> str:
+    return "".join(str(r.get("text", "")) for r in para.get("runs", []))
+
+
+def _cell_paragraph_alignment(
+    orig_paras: list[BodyParagraph],
+    rev_paras: list[BodyParagraph],
+    config: CompareConfig,
+) -> list[tuple[int | None, int | None]]:
+    """LCS alignment for paragraphs inside one table cell."""
+
+    sig_o = [_normalize_text(_cell_paragraph_text(p), config) for p in orig_paras]
+    sig_r = [_normalize_text(_cell_paragraph_text(p), config) for p in rev_paras]
+    sm = difflib.SequenceMatcher(None, sig_o, sig_r, autojunk=False)
+    out: list[tuple[int | None, int | None]] = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("equal", "replace"):
+            shared = min(i2 - i1, j2 - j1)
+            for k in range(shared):
+                out.append((i1 + k, j1 + k))
+            for k in range(shared, i2 - i1):
+                out.append((i1 + k, None))
+            for k in range(shared, j2 - j1):
+                out.append((None, j1 + k))
+        elif tag == "delete":
+            for i in range(i1, i2):
+                out.append((i, None))
+        elif tag == "insert":
+            for j in range(j1, j2):
+                out.append((None, j))
+    return out
+
+
+def _paragraph_is_list_like(p_el: ET.Element) -> bool:
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        return False
+    if ppr.find("w:numPr", NS) is not None:
+        return True
+    sid = _p_paragraph_style_id(p_el)
+    return bool(sid and _p_style_val_indicates_list_paragraph(sid))
+
+
+def _table_cell_should_preserve_paragraph_structure(
+    tc_paras: list[ET.Element], rev_tc_paras: list[ET.Element]
+) -> bool:
+    """
+    Enable paragraph-aware cell emit only for true list blocks.
+
+    Guardrails:
+    - require explicit ``w:numPr`` on at least one side (not style-only guesses),
+    - and require multi-paragraph list structure so normal cells keep legacy emit.
+    """
+
+    if len(tc_paras) < 2 and len(rev_tc_paras) < 2:
+        return False
+    has_numpr = any(p.find("w:pPr/w:numPr", NS) is not None for p in (tc_paras + rev_tc_paras))
+    if not has_numpr:
+        return False
+    list_like_count = sum(1 for p in (tc_paras + rev_tc_paras) if _paragraph_is_list_like(p))
+    return list_like_count >= 2
+
+
 def _ensure_tc_first_paragraph(tc_el: ET.Element) -> ET.Element:
     """Return first direct ``w:p`` in ``w:tc``; create one if absent."""
 
@@ -3755,52 +3828,142 @@ def _apply_table_cell_track_changes(
     date_iso: str,
     *,
     major_sentence_mode: bool = False,
+    revised_tc_el: ET.Element | None = None,
 ) -> None:
-    """Apply paragraph-style Track Changes for one table cell (merged text view)."""
+    """Apply paragraph-aware Track Changes for one table cell."""
 
-    orig_para = _cell_concat_paragraph(orig_cell)  # type: ignore[arg-type]
-    rev_para = _cell_concat_paragraph(rev_cell)  # type: ignore[arg-type]
-    if not _paragraph_needs_revision(orig_para, rev_para, config):
+    orig_paras = _cell_paragraphs(orig_cell)
+    rev_paras = _cell_paragraphs(rev_cell)
+    tc_paras = _tc_direct_paragraph_elements(tc_el)
+    rev_tc_paras = _tc_direct_paragraph_elements(revised_tc_el) if revised_tc_el is not None else []
+    preserve_para_structure = _table_cell_should_preserve_paragraph_structure(tc_paras, rev_tc_paras)
+
+    if not preserve_para_structure:
+        # Non-list table cells keep historical merged-paragraph emit behavior.
+        orig_para = _cell_concat_paragraph(orig_cell)  # type: ignore[arg-type]
+        rev_para = _cell_concat_paragraph(rev_cell)  # type: ignore[arg-type]
+        if not _paragraph_needs_revision(orig_para, rev_para, config):
+            return
+        orig_text = "".join(str(r.get("text", "")) for r in orig_para.get("runs", []))
+        rev_text = "".join(str(r.get("text", "")) for r in rev_para.get("runs", []))
+        orig_words = norm_keys([x for x in tokenize_for_lcs(orig_text) if not x.surface.isspace()])
+        rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
+        word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
+
+        first_p = _ensure_tc_first_paragraph(tc_el)
+        if (
+            major_sentence_mode
+            and orig_text
+            and rev_text
+            and min(len(orig_words), len(rev_words)) >= 4
+            and word_overlap < _TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX
+        ):
+            new_kids = [
+                _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+                _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+            ]
+        else:
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+                source_p_el=first_p,
+            )
+        _replace_p_content_preserving_p_pr(first_p, new_kids)
+        for extra in _tc_direct_paragraph_elements(tc_el)[1:]:
+            tc_el.remove(extra)
         return
-    orig_text = "".join(str(r.get("text", "")) for r in orig_para.get("runs", []))
-    rev_text = "".join(str(r.get("text", "")) for r in rev_para.get("runs", []))
-    orig_words = norm_keys([x for x in tokenize_for_lcs(orig_text) if not x.surface.isspace()])
-    rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
-    word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
 
-    first_p = _ensure_tc_first_paragraph(tc_el)
+    if not orig_paras:
+        orig_paras = [_empty_body_paragraph()]
+    if not rev_paras:
+        rev_paras = [_empty_body_paragraph()]
+    if not tc_paras:
+        tc_paras = [_ensure_tc_first_paragraph(tc_el)]
 
-    # For table cells, very low-overlap long text should render as full-line
-    # replacement (one del line + one ins line) so Word balloons show the
-    # entire deleted/inserted sentence clearly.
-    if (
-        major_sentence_mode
-        and
-        orig_text
-        and rev_text
-        and min(len(orig_words), len(rev_words)) >= 4
-        and word_overlap < _TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX
-    ):
-        new_kids = [
-            _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
-            _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
-        ]
-    else:
-        # Prefer the run-preserving TC builder when the current cell paragraph DOM
-        # aligns with the original IR. This prevents over-wide replace spans in
-        # common numeric/punctuation edits (SCRUM-141).
-        new_kids = build_paragraph_track_change_elements(
-            orig_para,
-            rev_para,
-            config,
-            id_counter=id_counter,
-            author=author,
-            date_iso=date_iso,
-            source_p_el=first_p,
-        )
-    _replace_p_content_preserving_p_pr(first_p, new_kids)
-    for extra in _tc_direct_paragraph_elements(tc_el)[1:]:
-        tc_el.remove(extra)
+    para_alignment = _cell_paragraph_alignment(orig_paras, rev_paras, config)
+    empty_para = _empty_body_paragraph()
+    out_paras: list[ET.Element] = []
+    for oi, ri in para_alignment:
+        orig_para = orig_paras[oi] if oi is not None and oi < len(orig_paras) else empty_para
+        rev_para = rev_paras[ri] if ri is not None and ri < len(rev_paras) else empty_para
+        source_p = tc_paras[oi] if oi is not None and oi < len(tc_paras) else None
+        revised_p = rev_tc_paras[ri] if ri is not None and ri < len(rev_tc_paras) else None
+
+        if oi is None:
+            out_paras.append(
+                _new_w_p_from_full_paragraph_insert(
+                    rev_para,
+                    config,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                    revised_p_el=revised_p,
+                )
+            )
+            continue
+
+        p_el = source_p if source_p is not None else ET.Element(f"{{{WORD_NAMESPACE}}}p")
+        if ri is None:
+            if _paragraph_needs_revision(orig_para, empty_para, config):
+                new_kids = build_paragraph_track_change_elements(
+                    orig_para,
+                    empty_para,
+                    config,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                    source_p_el=p_el,
+                )
+                _replace_p_content_preserving_p_pr(p_el, new_kids)
+            out_paras.append(p_el)
+            continue
+
+        if not _paragraph_needs_revision(orig_para, rev_para, config):
+            out_paras.append(p_el)
+            continue
+
+        orig_text = _cell_paragraph_text(orig_para)
+        rev_text = _cell_paragraph_text(rev_para)
+        orig_words = norm_keys([x for x in tokenize_for_lcs(orig_text) if not x.surface.isspace()])
+        rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
+        word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
+        if (
+            major_sentence_mode
+            and orig_text
+            and rev_text
+            and min(len(orig_words), len(rev_words)) >= 4
+            and word_overlap < _TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX
+        ):
+            new_kids = [
+                _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+                _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+            ]
+        else:
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+                source_p_el=p_el,
+            )
+        _replace_p_content_preserving_p_pr(p_el, new_kids)
+        out_paras.append(p_el)
+
+    for p in _tc_direct_paragraph_elements(tc_el):
+        tc_el.remove(p)
+    insert_at = 0
+    for i, ch in enumerate(list(tc_el)):
+        if _local_name(ch.tag) == "tcPr":
+            insert_at = i + 1
+            break
+    for i, p_el in enumerate(out_paras):
+        tc_el.insert(insert_at + i, p_el)
 
 
 def _merged_body_paragraph_from_span(
@@ -3983,6 +4146,7 @@ def _new_w_p_from_full_paragraph_insert(
     """A ``w:p`` whose content is Track Changes for text that exists only in the revised document."""
     p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
     if revised_p_el is not None:
+        _copy_revised_p_pr_to_inserted_paragraph(p_el, revised_p_el)
         runs = _paragraph_w_runs_in_document_order(revised_p_el)
         if runs:
             p_el.append(
@@ -4114,14 +4278,19 @@ def emit_docx_with_package_track_changes(
         date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     id_counter = [0]
+    revised_numbering_xml: bytes | None = None
+    has_original_numbering = False
     with zipfile.ZipFile(rev_path, "r") as zrev:
         rev_doc_blocks = load_structural_block_elements_from_docx_part(zrev, DOCUMENT_PART_PATH)
         rev_hf_blocks: dict[str, list[ET.Element]] = {}
         for _part in discover_header_footer_part_paths_from_namelist(zrev.namelist()):
             rev_hf_blocks[_part] = load_structural_block_elements_from_docx_part(zrev, _part)
+        if "word/numbering.xml" in zrev.namelist():
+            revised_numbering_xml = zrev.read("word/numbering.xml")
 
     with zipfile.ZipFile(orig_path, "r") as zin:
         raw_document_xml = zin.read(DOCUMENT_PART_PATH)
+        has_original_numbering = "word/numbering.xml" in zin.namelist()
     root = ET.fromstring(raw_document_xml)
     apply_body_track_changes_to_document_root(
         root,
@@ -4157,6 +4326,12 @@ def emit_docx_with_package_track_changes(
                 revised_block_elements=rev_hf_el,
             )
             replacements[part] = serialize_ooxml_part(hf_root, raw_hf)
+
+    # Keep numbering definitions in sync with any revised paragraph properties we
+    # copied (for example list bullets inside table cells). Without this, revised
+    # numId values can resolve to unrelated original numbering definitions.
+    if revised_numbering_xml is not None and has_original_numbering:
+        replacements["word/numbering.xml"] = revised_numbering_xml
 
     write_docx_copy_with_part_replacements(orig_path, out_path, replacements)
 
