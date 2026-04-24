@@ -112,6 +112,8 @@ _ALIGN_LENGTH_BYPASS_JACCARD_WORD_RATIO = 0.28
 # can look weak while the shorter string is still a full prefix of the longer.
 _ALIGN_LENGTH_BYPASS_PREFIX_MIN_CHARS = 36
 _MAX_INDEX_SKEW_FOR_LENGTH_BYPASS_PREFIX = 6
+_ALIGN_PUNCT_FLEX_PREFIX_MIN_CHARS = 12
+_ALIGN_PUNCT_FLEX_PREFIX_MIN_WORDS = 2
 
 # Full ``SequenceMatcher.ratio()`` on very large paragraph strings is quadratic
 # and can dominate golden-corpus runtime on the large IB protocols. Keep the
@@ -561,7 +563,46 @@ def _diagonal_prefix_anchor(o_txt: str, r_txt: str) -> bool:
     if o_st == r_st:
         return True
     shorter, longer = (o_st, r_st) if len(o_st) <= len(r_st) else (r_st, o_st)
-    return longer.startswith(shorter)
+    if longer.startswith(shorter):
+        return True
+    return _punctuation_flexible_prefix_match(o_st, r_st)
+
+
+def _punctuation_flexible_prefix_match(o_txt: str, r_txt: str) -> bool:
+    """
+    True when both paragraphs share the same opening token sequence and only
+    diverge on punctuation right at the boundary where the shorter text ends.
+
+    This keeps short sentence-shortening cases aligned when the revised text
+    ends the shared stem with a period while the original continues with a
+    comma-led clause.
+    """
+
+    o_st, r_st = o_txt.strip(), r_txt.strip()
+    if not o_st or not r_st:
+        return False
+    shorter, longer = (o_st, r_st) if len(o_st) <= len(r_st) else (r_st, o_st)
+    if len(shorter) < _ALIGN_PUNCT_FLEX_PREFIX_MIN_CHARS:
+        return False
+
+    shorter_tokens = [t for t in tokenize_for_lcs(shorter) if not t.surface.isspace()]
+    longer_tokens = [t for t in tokenize_for_lcs(longer) if not t.surface.isspace()]
+    shorter_words = [t for t in shorter_tokens if re.search(r"\w", t.surface)]
+    if len(shorter_words) < _ALIGN_PUNCT_FLEX_PREFIX_MIN_WORDS:
+        return False
+
+    i = j = 0
+    while i < len(shorter_tokens) and j < len(longer_tokens):
+        if shorter_tokens[i].norm_key() != longer_tokens[j].norm_key():
+            break
+        i += 1
+        j += 1
+
+    while i < len(shorter_tokens) and not re.search(r"\w", shorter_tokens[i].surface):
+        i += 1
+    while j < len(longer_tokens) and not re.search(r"\w", longer_tokens[j].surface):
+        j += 1
+    return i == len(shorter_tokens)
 
 
 def _toc_slot_pair_relaxed_align(o_txt: str, r_txt: str) -> bool:
@@ -642,15 +683,16 @@ def _length_weak_prefix_expansion_match(o_txt: str, r_txt: str) -> bool:
     """
     True when the shorter normalized text is a prefix of the longer and the
     shorter side is long enough to avoid accidental ``Hi``-style matches.
+    Also allows a punctuation-only boundary change at the end of the shared stem.
     """
 
     os, rs = o_txt.strip(), r_txt.strip()
     if not os or not rs:
         return False
     shorter, longer = (os, rs) if len(os) <= len(rs) else (rs, os)
-    if len(shorter) < _ALIGN_LENGTH_BYPASS_PREFIX_MIN_CHARS:
-        return False
-    return longer.startswith(shorter)
+    if len(shorter) >= _ALIGN_LENGTH_BYPASS_PREFIX_MIN_CHARS and longer.startswith(shorter):
+        return True
+    return _punctuation_flexible_prefix_match(os, rs)
 
 
 def _should_skip_expensive_char_ratio(

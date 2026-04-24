@@ -5,7 +5,7 @@
       "by_part": {
         "word/document.xml": {
           "del": 57,
-          "ins": 66
+          "ins": 65
         },
         "word/footer1.xml": {
           "del": 0,
@@ -27,7 +27,7 @@
       "summary": {
         "document": {
           "del": 57,
-          "ins": 66
+          "ins": 65
         },
         "footers": {
           "del": 0,
@@ -664,7 +664,7 @@
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 1022,
+          "del": 1021,
           "ins": 1840
         },
         "word/footer1.xml": {
@@ -758,7 +758,7 @@
       },
       "summary": {
         "document": {
-          "del": 1022,
+          "del": 1021,
           "ins": 1840
         },
         "footers": {
