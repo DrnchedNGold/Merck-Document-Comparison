@@ -214,6 +214,51 @@ def test_table_cell_numbered_paragraphs_keep_numbered_numpr() -> None:
         assert num_id.get(f"{{{WORD_NS}}}val") == "42"
 
 
+def test_table_cell_non_list_multi_para_keeps_legacy_merged_emit() -> None:
+    """Non-list table cells should keep merged paragraph emit behavior."""
+
+    tc = ET.Element(f"{{{WORD_NS}}}tc")
+    for txt in ("Alpha line", "Bravo line"):
+        p = ET.SubElement(tc, f"{{{WORD_NS}}}p")
+        r = ET.SubElement(p, f"{{{WORD_NS}}}r")
+        t = ET.SubElement(r, f"{{{WORD_NS}}}t")
+        t.text = txt
+
+    revised_tc = ET.Element(f"{{{WORD_NS}}}tc")
+    for txt in ("Alpha line", "Bravo changed line"):
+        p = ET.SubElement(revised_tc, f"{{{WORD_NS}}}p")
+        r = ET.SubElement(p, f"{{{WORD_NS}}}r")
+        t = ET.SubElement(r, f"{{{WORD_NS}}}t")
+        t.text = txt
+
+    orig_cell = {
+        "paragraphs": [
+            {"type": "paragraph", "id": "m0", "runs": [{"text": "Alpha line"}]},
+            {"type": "paragraph", "id": "m1", "runs": [{"text": "Bravo line"}]},
+        ]
+    }
+    rev_cell = {
+        "paragraphs": [
+            {"type": "paragraph", "id": "m0", "runs": [{"text": "Alpha line"}]},
+            {"type": "paragraph", "id": "m1", "runs": [{"text": "Bravo changed line"}]},
+        ]
+    }
+
+    body_revision_emit._apply_table_cell_track_changes(
+        tc,
+        orig_cell,
+        rev_cell,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        [0],
+        "Test",
+        "2026-04-23T00:00:00Z",
+        revised_tc_el=revised_tc,
+    )
+
+    paras = [c for c in tc if _local_name(c.tag) == "p"]
+    assert len(paras) == 1
+
+
 def test_build_paragraph_track_change_insert_has_ins_with_t() -> None:
     orig = _paragraph_block("Hello")
     rev = _paragraph_block("Hello world")

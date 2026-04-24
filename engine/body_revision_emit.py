@@ -3731,6 +3731,36 @@ def _cell_paragraph_alignment(
     return out
 
 
+def _paragraph_is_list_like(p_el: ET.Element) -> bool:
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        return False
+    if ppr.find("w:numPr", NS) is not None:
+        return True
+    sid = _p_paragraph_style_id(p_el)
+    return bool(sid and _p_style_val_indicates_list_paragraph(sid))
+
+
+def _table_cell_should_preserve_paragraph_structure(
+    tc_paras: list[ET.Element], rev_tc_paras: list[ET.Element]
+) -> bool:
+    """
+    Enable paragraph-aware cell emit only for true list blocks.
+
+    Guardrails:
+    - require explicit ``w:numPr`` on at least one side (not style-only guesses),
+    - and require multi-paragraph list structure so normal cells keep legacy emit.
+    """
+
+    if len(tc_paras) < 2 and len(rev_tc_paras) < 2:
+        return False
+    has_numpr = any(p.find("w:pPr/w:numPr", NS) is not None for p in (tc_paras + rev_tc_paras))
+    if not has_numpr:
+        return False
+    list_like_count = sum(1 for p in (tc_paras + rev_tc_paras) if _paragraph_is_list_like(p))
+    return list_like_count >= 2
+
+
 def _ensure_tc_first_paragraph(tc_el: ET.Element) -> ET.Element:
     """Return first direct ``w:p`` in ``w:tc``; create one if absent."""
 
@@ -3765,6 +3795,46 @@ def _apply_table_cell_track_changes(
     rev_paras = _cell_paragraphs(rev_cell)
     tc_paras = _tc_direct_paragraph_elements(tc_el)
     rev_tc_paras = _tc_direct_paragraph_elements(revised_tc_el) if revised_tc_el is not None else []
+    preserve_para_structure = _table_cell_should_preserve_paragraph_structure(tc_paras, rev_tc_paras)
+
+    if not preserve_para_structure:
+        # Non-list table cells keep historical merged-paragraph emit behavior.
+        orig_para = _cell_concat_paragraph(orig_cell)  # type: ignore[arg-type]
+        rev_para = _cell_concat_paragraph(rev_cell)  # type: ignore[arg-type]
+        if not _paragraph_needs_revision(orig_para, rev_para, config):
+            return
+        orig_text = "".join(str(r.get("text", "")) for r in orig_para.get("runs", []))
+        rev_text = "".join(str(r.get("text", "")) for r in rev_para.get("runs", []))
+        orig_words = norm_keys([x for x in tokenize_for_lcs(orig_text) if not x.surface.isspace()])
+        rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
+        word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
+
+        first_p = _ensure_tc_first_paragraph(tc_el)
+        if (
+            major_sentence_mode
+            and orig_text
+            and rev_text
+            and min(len(orig_words), len(rev_words)) >= 4
+            and word_overlap < _TABLE_MAJOR_SENTENCE_WORD_OVERLAP_MAX
+        ):
+            new_kids = [
+                _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
+                _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
+            ]
+        else:
+            new_kids = build_paragraph_track_change_elements(
+                orig_para,
+                rev_para,
+                config,
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+                source_p_el=first_p,
+            )
+        _replace_p_content_preserving_p_pr(first_p, new_kids)
+        for extra in _tc_direct_paragraph_elements(tc_el)[1:]:
+            tc_el.remove(extra)
+        return
 
     if not orig_paras:
         orig_paras = [_empty_body_paragraph()]
