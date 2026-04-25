@@ -231,6 +231,59 @@ def _emit_cloned_runs_for_raw_range(
     return out
 
 
+def _w_ins_segment_from_aligned_runs_range(
+    aligned: list[tuple[ET.Element, str]],
+    start: int,
+    end: int,
+    ins_id: str,
+    author: str,
+    date_iso: str,
+) -> ET.Element | None:
+    """Inserted segment using cloned revised runs for one raw text span."""
+
+    runs = _emit_cloned_runs_for_raw_range(aligned, start, end)
+    if not runs:
+        return None
+    ins_el = ET.Element(
+        f"{{{WORD_NAMESPACE}}}ins",
+        {
+            f"{{{WORD_NAMESPACE}}}id": ins_id,
+            f"{{{WORD_NAMESPACE}}}author": author,
+            f"{{{WORD_NAMESPACE}}}date": date_iso,
+        },
+    )
+    for run in runs:
+        ins_el.append(run)
+    return ins_el
+
+
+def _w_del_segment_from_aligned_runs_range(
+    aligned: list[tuple[ET.Element, str]],
+    start: int,
+    end: int,
+    del_id: str,
+    author: str,
+    date_iso: str,
+) -> ET.Element | None:
+    """Deleted segment using cloned original runs for one raw text span."""
+
+    runs = _emit_cloned_runs_for_raw_range(aligned, start, end)
+    if not runs:
+        return None
+    del_el = ET.Element(
+        f"{{{WORD_NAMESPACE}}}del",
+        {
+            f"{{{WORD_NAMESPACE}}}id": del_id,
+            f"{{{WORD_NAMESPACE}}}author": author,
+            f"{{{WORD_NAMESPACE}}}date": date_iso,
+        },
+    )
+    for run in runs:
+        _runs_convert_w_t_to_del_text(run)
+        del_el.append(run)
+    return del_el
+
+
 def _emit_structured_equal_runs(struct: list[StructuredOrigToken], lo: int, hi: int) -> list[ET.Element]:
     """
     Emit ``w:r`` for an ``equal`` LCS span using per-token ``w:r`` linkage.
@@ -272,6 +325,7 @@ def _try_build_track_changes_preserving_orig_runs(
     rev_para: BodyParagraph,
     config: CompareConfig,
     *,
+    revised_p_el: ET.Element | None,
     id_counter: list[int],
     author: str,
     date_iso: str,
@@ -289,6 +343,9 @@ def _try_build_track_changes_preserving_orig_runs(
     aligned = _runs_align_with_ir_for_preserving(p_el, orig_para, config)
     if aligned is None:
         return None
+    revised_aligned: list[tuple[ET.Element, str]] | None = None
+    if revised_p_el is not None:
+        revised_aligned = _runs_align_with_ir_for_preserving(revised_p_el, rev_para, config)
     orig_cmp = _concat_paragraph_text(orig_para, config)
     rev_text = _concat_paragraph_text(rev_para, config)
     if _numeric_grouping_only_change(orig_cmp, rev_text):
@@ -333,40 +390,56 @@ def _try_build_track_changes_preserving_orig_runs(
         elif tag == "delete":
             chunk = equal_span_surface(ot, i1, i2)
             if chunk:
-                out.append(_w_del_segment(chunk, _next_id(id_counter), author, date_iso))
+                ts, te = bounds_from_token_indices(ot, i1, i2)
+                del_id = _next_id(id_counter)
+                del_el = _w_del_segment_from_aligned_runs_range(
+                    aligned,
+                    ts,
+                    te,
+                    del_id,
+                    author,
+                    date_iso,
+                )
+                if del_el is not None:
+                    out.append(del_el)
+                else:
+                    out.append(_w_del_segment(chunk, del_id, author, date_iso))
         elif tag == "insert":
             chunk = equal_span_surface(rt, j1, j2)
             if chunk:
+                if revised_aligned is not None:
+                    rs, re_ = bounds_from_token_indices(rt, j1, j2)
+                    ins_el = _w_ins_segment_from_aligned_runs_range(
+                        revised_aligned,
+                        rs,
+                        re_,
+                        _next_id(id_counter),
+                        author,
+                        date_iso,
+                    )
+                    if ins_el is not None:
+                        out.append(ins_el)
+                        continue
                 out.append(_w_ins_segment(chunk, _next_id(id_counter), author, date_iso))
         elif tag == "replace":
             before_text = equal_span_surface(ot, i1, i2)
             after_text = equal_span_surface(rt, j1, j2)
-            if _replace_span_prefers_char_level_track_changes(before_text, after_text):
-                out.extend(
-                    _emit_char_level_tc_elements(
-                        before_text,
-                        after_text,
-                        id_counter=id_counter,
-                        author=author,
-                        date_iso=date_iso,
-                    )
+            out.extend(
+                _emit_preserving_replace_multitoken_bounded(
+                    aligned,
+                    ot,
+                    rt,
+                    i1,
+                    i2,
+                    j1,
+                    j2,
+                    struct_ot=struct_ot,
+                    revised_aligned=revised_aligned,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
                 )
-            else:
-                out.extend(
-                    _emit_preserving_replace_multitoken_bounded(
-                        aligned,
-                        ot,
-                        rt,
-                        i1,
-                        i2,
-                        j1,
-                        j2,
-                        struct_ot=struct_ot,
-                        id_counter=id_counter,
-                        author=author,
-                        date_iso=date_iso,
-                    )
-                )
+            )
     return out
 
 
@@ -983,6 +1056,7 @@ def _emit_preserving_replace_multitoken_bounded(
     j2: int,
     *,
     struct_ot: list[StructuredOrigToken] | None,
+    revised_aligned: list[tuple[ET.Element, str]] | None,
     id_counter: list[int],
     author: str,
     date_iso: str,
@@ -1002,8 +1076,34 @@ def _emit_preserving_replace_multitoken_bounded(
     ar = equal_span_surface(rt, j1, j2)
     out: list[ET.Element] = []
     if bo:
-        out.append(_w_del_segment(bo, _next_id(id_counter), author, date_iso))
+        ts, te = bounds_from_token_indices(ot, i1, i2)
+        del_id = _next_id(id_counter)
+        del_el = _w_del_segment_from_aligned_runs_range(
+            aligned,
+            ts,
+            te,
+            del_id,
+            author,
+            date_iso,
+        )
+        if del_el is not None:
+            out.append(del_el)
+        else:
+            out.append(_w_del_segment(bo, del_id, author, date_iso))
     if ar:
+        if revised_aligned is not None:
+            rs, re_ = bounds_from_token_indices(rt, j1, j2)
+            ins_el = _w_ins_segment_from_aligned_runs_range(
+                revised_aligned,
+                rs,
+                re_,
+                _next_id(id_counter),
+                author,
+                date_iso,
+            )
+            if ins_el is not None:
+                out.append(ins_el)
+                return out
         out.append(_w_ins_segment(ar, _next_id(id_counter), author, date_iso))
     return out
 
@@ -2700,6 +2800,7 @@ def build_paragraph_track_change_elements(
     author: str,
     date_iso: str,
     source_p_el: ET.Element | None = None,
+    revised_p_el: ET.Element | None = None,
 ) -> list[ET.Element]:
     """Return ordered ``w:r`` / ``w:ins`` / ``w:del`` children for one ``w:p``."""
 
@@ -2736,6 +2837,7 @@ def build_paragraph_track_change_elements(
             original,
             revised,
             config,
+            revised_p_el=revised_p_el,
             id_counter=id_counter,
             author=author,
             date_iso=date_iso,
@@ -3533,6 +3635,7 @@ def _apply_track_changes_to_structural_container(
                         id_counter=id_counter,
                         author=author,
                         date_iso=date_iso,
+                        revised_p_el=split_rev_elements[0] if split_rev_elements else None,
                     )
                     _replace_p_content_preserving_p_pr(el, first_kids)
                 insert_at = list(container).index(el) + 1
@@ -3584,6 +3687,7 @@ def _apply_track_changes_to_structural_container(
                     author=author,
                     date_iso=date_iso,
                     source_p_el=el,
+                    revised_p_el=rev_el_for_match,
                 )
             _replace_p_content_preserving_p_pr(el, new_kids)
         elif oi is not None and rj is None:
@@ -3818,6 +3922,30 @@ def _ensure_tc_first_paragraph(tc_el: ET.Element) -> ET.Element:
     return p_el
 
 
+def _merged_tc_paragraph_for_preserving(paras: list[ET.Element]) -> ET.Element | None:
+    """
+    Synthetic merged ``w:p`` for non-list table-cell preserving emit.
+
+    This keeps original/revised run structure across multi-paragraph cells by
+    cloning each paragraph's runs in order and inserting an explicit newline run
+    between paragraphs so the XML text matches :func:`_cell_concat_paragraph`.
+    """
+
+    if not paras:
+        return None
+    merged = ET.Element(f"{{{WORD_NAMESPACE}}}p")
+    for pi, p_el in enumerate(paras):
+        for r_el in p_el.findall(".//w:r", NS):
+            if _parse_text_from_run_element(r_el):
+                merged.append(copy.deepcopy(r_el))
+        if pi < len(paras) - 1:
+            nl_r = ET.Element(f"{{{WORD_NAMESPACE}}}r")
+            nl_t = ET.SubElement(nl_r, f"{{{WORD_NAMESPACE}}}t")
+            nl_t.text = "\n"
+            merged.append(nl_r)
+    return merged
+
+
 def _apply_table_cell_track_changes(
     tc_el: ET.Element,
     orig_cell: dict,
@@ -3851,6 +3979,8 @@ def _apply_table_cell_track_changes(
         word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
 
         first_p = _ensure_tc_first_paragraph(tc_el)
+        merged_source_p = _merged_tc_paragraph_for_preserving(tc_paras)
+        merged_revised_p = _merged_tc_paragraph_for_preserving(rev_tc_paras)
         if (
             major_sentence_mode
             and orig_text
@@ -3870,7 +4000,8 @@ def _apply_table_cell_track_changes(
                 id_counter=id_counter,
                 author=author,
                 date_iso=date_iso,
-                source_p_el=first_p,
+                source_p_el=merged_source_p if merged_source_p is not None else first_p,
+                revised_p_el=merged_revised_p,
             )
         _replace_p_content_preserving_p_pr(first_p, new_kids)
         for extra in _tc_direct_paragraph_elements(tc_el)[1:]:
@@ -3917,6 +4048,7 @@ def _apply_table_cell_track_changes(
                     author=author,
                     date_iso=date_iso,
                     source_p_el=p_el,
+                    revised_p_el=revised_p,
                 )
                 _replace_p_content_preserving_p_pr(p_el, new_kids)
             out_paras.append(p_el)
@@ -3951,6 +4083,7 @@ def _apply_table_cell_track_changes(
                 author=author,
                 date_iso=date_iso,
                 source_p_el=p_el,
+                revised_p_el=revised_p,
             )
         _replace_p_content_preserving_p_pr(p_el, new_kids)
         out_paras.append(p_el)

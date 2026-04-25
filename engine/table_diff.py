@@ -17,14 +17,18 @@ from .inline_run_diff import inline_diff_single_paragraph
 
 
 def _cell_concat_paragraph(cell: BodyTableCell) -> BodyParagraph:
-    """Merge cell paragraphs into one paragraph (newline between paragraphs)."""
+    """Merge cell paragraphs into one paragraph while preserving run boundaries."""
 
-    parts: list[str] = []
-    for para in cell.get("paragraphs", []):
-        text = "".join(str(r.get("text", "")) for r in para.get("runs", []))
-        parts.append(text)
-    merged = "\n".join(parts)
-    return {"type": "paragraph", "id": "cell-merged", "runs": [{"text": merged}]}
+    merged_runs: list[dict[str, str]] = []
+    paragraphs = cell.get("paragraphs", [])
+    for pi, para in enumerate(paragraphs):
+        for run in para.get("runs", []):
+            text = str(run.get("text", ""))
+            if text:
+                merged_runs.append({"text": text})
+        if pi < len(paragraphs) - 1:
+            merged_runs.append({"text": "\n"})
+    return {"type": "paragraph", "id": "cell-merged", "runs": merged_runs}
 
 
 def _table_shape(table: BodyTable) -> tuple[int, list[int]]:
