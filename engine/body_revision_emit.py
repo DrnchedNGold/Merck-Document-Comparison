@@ -312,7 +312,7 @@ def _try_build_track_changes_preserving_orig_runs(
         opcodes = coalesced_suffix
     else:
         opcodes = _merge_unstable_opcode_regions(opcodes, ot, rt)
-    opcodes = _merge_change_cluster_between_meaningful_equals(opcodes)
+    opcodes = _merge_change_cluster_between_meaningful_equals(opcodes, ot, rt)
     opcodes = _split_replace_opcodes_on_internal_meaningful_equals(opcodes, ot, rt)
     opcodes = _left_bias_internal_equal_between_changes(opcodes, ot, rt)
     opcodes = _pull_meaningful_equal_earlier_from_long_left_replace(opcodes, ot, rt)
@@ -1159,6 +1159,30 @@ def _tc_equal_opcode_tokens_all_trivial_for_merge(
     return True
 
 
+def _tc_equal_opcode_has_hard_boundary_for_merge(
+    orig_tokens: list,
+    ei1: int,
+    ei2: int,
+    rev_tokens: list,
+    ej1: int,
+    ej2: int,
+) -> bool:
+    """
+    True when a trivial equal span still marks a sentence/reference boundary.
+
+    We do not want ``replace`` chain collapsing to merge across stable boundaries
+    such as ``. `` or ``]. `` because that turns local edits into large
+    cross-sentence replace spans.
+    """
+
+    text = "".join(tok.surface for tok in orig_tokens[ei1:ei2]) + "".join(
+        tok.surface for tok in rev_tokens[ej1:ej2]
+    )
+    if not text:
+        return False
+    return any(ch in text for ch in ".!?;]")
+
+
 def _collapse_adjacent_replace_opcodes(
     opcodes: list[tuple[str, int, int, int, int]],
     orig_tokens: list,
@@ -1189,6 +1213,10 @@ def _collapse_adjacent_replace_opcodes(
             if et != "equal" or rt != "replace":
                 break
             if not _tc_equal_opcode_tokens_all_trivial_for_merge(
+                orig_tokens, ei1, ei2, rev_tokens, ej1, ej2
+            ):
+                break
+            if _tc_equal_opcode_has_hard_boundary_for_merge(
                 orig_tokens, ei1, ei2, rev_tokens, ej1, ej2
             ):
                 break
@@ -1449,6 +1477,8 @@ def _merge_unstable_opcode_regions(
 
 def _merge_change_cluster_between_meaningful_equals(
     opcodes: list[tuple[str, int, int, int, int]],
+    orig_tokens: list,
+    rev_tokens: list,
 ) -> list[tuple[str, int, int, int, int]]:
     """
     Collapse a fragmented change cluster between substantial equal anchors.
@@ -1515,11 +1545,19 @@ def _merge_change_cluster_between_meaningful_equals(
             ((i2 - i1) for tag, i1, i2, _j1, _j2 in region if tag == "equal"),
             default=0,
         )
+        hard_boundary_inside_region = any(
+            tag == "equal"
+            and _tc_equal_opcode_has_hard_boundary_for_merge(
+                orig_tokens, i1, i2, rev_tokens, j1, j2
+            )
+            for tag, i1, i2, j1, j2 in region
+        )
         if (
             change_count >= _TC_CLUSTER_MIN_CHANGE_OPCODES
             and strongest_inner_equal < _TC_CLUSTER_STRONG_INNER_EQUAL_TOKENS
             and changed_token_total > max(12, equal_token_total * 2)
             and _tc_opcode_prefix_is_contiguous(region)
+            and not hard_boundary_inside_region
         ):
             out.append(_emit_change_opcode(region))
             out.append(opcodes[j])
@@ -2177,6 +2215,9 @@ def _absorb_weak_equal_islands_between_changes(
                 if (
                     (mid[2] - mid[1]) <= _TC_CLUSTER_MEANINGFUL_EQUAL_TOKENS
                     and _equal_text_is_weak_anchor(mid_text)
+                    and not _tc_equal_opcode_has_hard_boundary_for_merge(
+                        orig_tokens, mid[1], mid[2], rev_tokens, mid[3], mid[4]
+                    )
                 ):
                     i1_lo = left[1]
                     i2_hi = right[2]
@@ -2538,7 +2579,7 @@ def _track_change_elements_for_concat_texts(
         opcodes = coalesced_suffix
     else:
         opcodes = _merge_unstable_opcode_regions(opcodes, orig_tokens, rev_tokens)
-    opcodes = _merge_change_cluster_between_meaningful_equals(opcodes)
+    opcodes = _merge_change_cluster_between_meaningful_equals(opcodes, orig_tokens, rev_tokens)
     opcodes = _split_replace_opcodes_on_internal_meaningful_equals(
         opcodes, orig_tokens, rev_tokens
     )

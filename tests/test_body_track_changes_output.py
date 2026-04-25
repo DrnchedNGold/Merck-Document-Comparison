@@ -727,6 +727,53 @@ def test_build_paragraph_track_change_splits_replace_on_multiple_short_nonweak_a
     assert "groups" in plain
 
 
+def test_build_paragraph_track_change_keeps_cervical_disparities_reference_boundary_stable() -> None:
+    """SCRUM-151: keep the reference/sentence boundary plain in the disparities rewrite."""
+
+    orig = _paragraph_block(
+        "Racial and ethnic differences in cervical cancer incidence and mortality in the US "
+        "may be partly attributed to differences in access to healthcare/screening and follow-up "
+        "after abnormal results [Ref. 5.4: 08BZMY, 08D67R]. Cervical screening that employs "
+        "cytology is less effective in detecting adenocarcinoma compared with SCC, which may "
+        "partly explain the relative lower incidence of cervical adenocarcinoma among Black women "
+        "[Ref. 5.4: 03Q0K8, 08D67W]. It is also possible that the differences in the prevalence "
+        "of HPV16 contribute to subtype-specific differences in cervical cancer incidence, "
+        "particularly because of its reduced prevalence among Black women compared with White "
+        "women in the US, and because this type is more likely to cause adenocarcinoma relative "
+        "to other HPV types [Ref. 5.4: 08D67M, 08D67G, 08D67L]. "
+    )
+    rev = _paragraph_block(
+        "Disparities in cervical cancer incidence and mortality exist by geographic area and "
+        "income level, which may reflect differences in access to health care/screening and "
+        "follow-up after abnormal results [Ref. 5.4: 08BZMY, 08D67R, 08RS8Q, 08RS8S]. Women "
+        "living in nonmetropolitan or rural areas had higher incidence of cervical cancer and "
+        "higher mortality from cervical cancer compared with those living in urban or metropolitan "
+        "areas, in part due to lower vaccination and screening rates [Ref. 5.4: 08RS8S]. Deaths "
+        "from cervical cancer were 48.8% higher in counties with persistent poverty compared with "
+        "nonpersistent poverty counties [Ref. 5.4: 08RS8N]. Mortality rates were highest for "
+        "Black residents of counties that were both rural and lowincome/persistent poverty "
+        "[Ref. 5.4: 08RS8N, 08RS8Q]."
+    )
+
+    els = build_paragraph_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-24T00:00:00Z",
+    )
+
+    plain_chunks = [_collect_t_text(e) for e in els if _local_name(e.tag) == "r"]
+    del_chunks = [_collect_del_text(e) for e in els if _local_name(e.tag) == "del"]
+
+    assert "]. " in plain_chunks
+    assert "adenocarcinoma among Black women " in del_chunks
+    assert not any(
+        "Cervical screening" in chunk and "03Q0K8" in chunk for chunk in del_chunks
+    ), del_chunks
+
+
 def test_build_paragraph_track_change_prefers_earlier_repeated_internal_anchor() -> None:
     """Repeated equal text inside a coarse replace should anchor to the earlier semantic match."""
     orig = _paragraph_block(
@@ -2158,6 +2205,50 @@ def test_scrum121_cervical_disparities_inline_track_changes_not_full_paragraph_d
     assert idx + 1 < len(paras)
     next_plain = _collect_t_text(paras[idx + 1]).strip()
     assert next_plain.startswith("Black women were more likely to be diagnosed")
+
+
+def test_scrum151_cervical_disparities_reference_boundary_not_swallowed_into_large_delete(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-151: keep the adenocarcinoma sentence and reference boundary split cleanly."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum151_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+    target_p = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if "adenocarcinoma among Black women" in _collect_del_text(p)
+        ),
+        None,
+    )
+    assert target_p is not None
+
+    plain_chunks = [
+        _collect_t_text(e) for e in list(target_p) if _local_name(e.tag) == "r"
+    ]
+    del_chunks = [_collect_del_text(d) for d in target_p.findall(".//w:del", NS)]
+
+    assert "]" in plain_chunks
+    assert ". " in plain_chunks
+    assert "adenocarcinoma among Black women " in del_chunks
+    assert not any(
+        "Cervical screening" in chunk and "03Q0K8" in chunk for chunk in del_chunks
+    ), del_chunks
 
 
 def test_scrum127_cervical_page1_front_matter_preserves_blank_block_structure(
