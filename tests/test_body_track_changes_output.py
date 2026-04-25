@@ -83,6 +83,16 @@ def _w_p_with_numpr(text: str, *, num_id: str, ilvl: str = "0") -> ET.Element:
     return p
 
 
+def _w_r_with_vert_align(text: str, *, val: str) -> ET.Element:
+    r = ET.Element(f"{{{WORD_NS}}}r")
+    rpr = ET.SubElement(r, f"{{{WORD_NS}}}rPr")
+    va = ET.SubElement(rpr, f"{{{WORD_NS}}}vertAlign")
+    va.set(f"{{{WORD_NS}}}val", val)
+    t = ET.SubElement(r, f"{{{WORD_NS}}}t")
+    t.text = text
+    return r
+
+
 def _body_block_sequence(body: ET.Element) -> list[tuple[str, str]]:
     seq: list[tuple[str, str]] = []
     for ch in list(body):
@@ -985,6 +995,136 @@ def test_preserving_path_table_header_keeps_long_prefix_plain() -> None:
     del_all = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
     assert prefix in plain
     assert prefix not in del_all
+
+
+def test_table_header_cell_preserves_superscript_footnote_runs_during_year_change() -> None:
+    tc = ET.Element(f"{{{WORD_NS}}}tc")
+    p = ET.SubElement(tc, f"{{{WORD_NS}}}p")
+    r1 = ET.SubElement(p, f"{{{WORD_NS}}}r")
+    t1 = ET.SubElement(r1, f"{{{WORD_NS}}}t")
+    t1.text = "Estimated Number of New Cases in 2023"
+    p.append(_w_r_with_vert_align("b, c, d", val="superscript"))
+    r3 = ET.SubElement(p, f"{{{WORD_NS}}}r")
+    t3 = ET.SubElement(r3, f"{{{WORD_NS}}}t")
+    t3.text = ", n (%)"
+
+    revised_tc = ET.Element(f"{{{WORD_NS}}}tc")
+    revised_p = ET.SubElement(revised_tc, f"{{{WORD_NS}}}p")
+    rr1 = ET.SubElement(revised_p, f"{{{WORD_NS}}}r")
+    rt1 = ET.SubElement(rr1, f"{{{WORD_NS}}}t")
+    rt1.text = "Estimated Number of New Cases in 2025"
+    revised_p.append(_w_r_with_vert_align("b,c,d", val="superscript"))
+    rr3 = ET.SubElement(revised_p, f"{{{WORD_NS}}}r")
+    rt3 = ET.SubElement(rr3, f"{{{WORD_NS}}}t")
+    rt3.text = ", n (%)"
+
+    orig_cell = {
+        "paragraphs": [
+            {
+                "type": "paragraph",
+                "id": "p1",
+                "runs": [
+                    {"text": "Estimated Number of New Cases in 2023"},
+                    {"text": "b, c, d"},
+                    {"text": ", n (%)"},
+                ],
+            }
+        ]
+    }
+    rev_cell = {
+        "paragraphs": [
+            {
+                "type": "paragraph",
+                "id": "p1",
+                "runs": [
+                    {"text": "Estimated Number of New Cases in 2025"},
+                    {"text": "b,c,d"},
+                    {"text": ", n (%)"},
+                ],
+            }
+        ]
+    }
+
+    body_revision_emit._apply_table_cell_track_changes(
+        tc,
+        orig_cell,
+        rev_cell,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        [0],
+        "Test",
+        "2026-04-25T00:00:00Z",
+        revised_tc_el=revised_tc,
+    )
+
+    superscript_runs = [
+        r
+        for r in tc.findall(".//w:r", NS)
+        if r.find("w:rPr/w:vertAlign[@w:val='superscript']", NS) is not None
+    ]
+    superscript_texts = [_collect_t_text(r) for r in superscript_runs]
+    assert any(any(ch in text for ch in ("b", "c", "d")) for text in superscript_texts)
+    del_all = "".join(_collect_del_text(e) for e in tc.findall(".//w:del", NS))
+    ins_all = "".join(_collect_t_text(e) for e in tc.findall(".//w:ins", NS))
+    deleted_superscript_runs = [
+        r
+        for r in tc.findall(".//w:del//w:r", NS)
+        if r.find("w:rPr/w:vertAlign[@w:val='superscript']", NS) is not None
+    ]
+    assert any("b" in _collect_del_text(r) for r in deleted_superscript_runs)
+    assert "2023" in del_all
+    assert "2025" in ins_all
+    assert "Estimated Number of New Cases in " not in del_all
+
+
+def test_scrum154_cervical_table_header_superscripts_remain_superscripted(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum154_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    target_tc = next(
+        (
+            tc
+            for tc in root.findall(".//w:tc", NS)
+            if "Estimated Number" in _collect_t_text(tc)
+            and "of New Cases in" in _collect_t_text(tc)
+            and "n (%)" in _collect_t_text(tc)
+            and any(
+                any(ch in _collect_t_text(r) for ch in ("b", "c", "d"))
+                for r in tc.findall(".//w:r", NS)
+                if r.find("w:rPr/w:vertAlign[@w:val='superscript']", NS) is not None
+            )
+        ),
+        None,
+    )
+    assert target_tc is not None
+    superscript_runs = [
+        r
+        for r in target_tc.findall(".//w:r", NS)
+        if r.find("w:rPr/w:vertAlign[@w:val='superscript']", NS) is not None
+    ]
+    superscript_texts = [_collect_t_text(r) for r in superscript_runs]
+    assert any(any(ch in text for ch in ("b", "c", "d")) for text in superscript_texts)
+    del_all = "".join(_collect_del_text(e) for e in target_tc.findall(".//w:del", NS))
+    ins_all = "".join(_collect_t_text(e) for e in target_tc.findall(".//w:ins", NS))
+    deleted_superscript_runs = [
+        r
+        for r in target_tc.findall(".//w:del//w:r", NS)
+        if r.find("w:rPr/w:vertAlign[@w:val='superscript']", NS) is not None
+    ]
+    assert any("b" in _collect_del_text(r) for r in deleted_superscript_runs)
+    assert "2023" in del_all
+    assert "2025" in ins_all
+    assert "Estimated Number of New Cases in " not in del_all
 
 
 def test_build_paragraph_track_change_dedupes_reinserted_plain_anchor() -> None:
