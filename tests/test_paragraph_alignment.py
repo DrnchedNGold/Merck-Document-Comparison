@@ -529,3 +529,21 @@ def test_scrum138_cervical_merged_heading_block_pairs_split_rev_paragraphs() -> 
     assert by_o[67].revised_paragraph_index == 95
     assert by_o[67].revised_merge_end_exclusive is None
     assert by_o[68].revised_paragraph_index == 96
+
+
+def test_scrum156_cervical_heading_suffix_rewrite_stays_matched() -> None:
+    """SCRUM-156: short numbered heading rewrite should stay paired for inline emit."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    orig = parse_docx_body_ir(v1)
+    rev = parse_docx_body_ir(v2)
+    al = alignment_for_track_changes_emit(orig, rev, DEFAULT_WORD_LIKE_COMPARE_CONFIG)
+    by_o = {a.original_paragraph_index: a for a in al if a.original_paragraph_index is not None}
+
+    assert by_o[62].revised_paragraph_index == 83
+    assert by_o[62].revised_merge_end_exclusive is None
