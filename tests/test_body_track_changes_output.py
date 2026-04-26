@@ -544,6 +544,47 @@ def test_toc_line_cervical_section_11_inline_title_diff_single_paragraph(tmp_pat
     )
 
 
+def test_scrum156_cervical_heading3_rewrite_keeps_numbered_paragraph_inline(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-156: Heading3 rewrite should stay in one numbered paragraph with inline text revisions."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum156_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    matches = []
+    for p in body.findall("w:p", NS):
+        pstyle = p.find("w:pPr/w:pStyle", NS)
+        if pstyle is None or pstyle.get(f"{{{WORD_NS}}}val") != "Heading3":
+            continue
+        combined = _collect_t_text(p) + _collect_del_text(p)
+        if "Pathophysiology" in combined:
+            matches.append(p)
+
+    assert len(matches) == 1
+    target = matches[0]
+    num_id = target.find("w:pPr/w:numPr/w:numId", NS)
+    assert num_id is not None
+    assert num_id.get(f"{{{WORD_NS}}}val") == "4"
+    assert _collect_t_text(target) == "Differences in Pathophysiology"
+    assert len(target.findall(".//w:ins", NS)) == 1
+    assert "".join(t.text or "" for t in target.findall(".//w:ins//w:t", NS)) == "Differences in "
+
+
 def test_build_paragraph_track_change_preserves_unchanged_date_year_suffix() -> None:
     """SCRUM-105: only changed date core should be revised; -2025 remains unchanged."""
     orig = _paragraph_block("Release Date:\t09-APR-2025")

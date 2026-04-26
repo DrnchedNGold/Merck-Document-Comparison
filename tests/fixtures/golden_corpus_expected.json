@@ -42,7 +42,7 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 440,
+          "del": 439,
           "ins": 567
         },
         "word/footer1.xml": {
@@ -56,7 +56,7 @@
       },
       "summary": {
         "document": {
-          "del": 440,
+          "del": 439,
           "ins": 567
         },
         "footers": {
@@ -376,7 +376,7 @@
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 6658,
+          "del": 6657,
           "ins": 17787
         },
         "word/footer1.xml": {
@@ -602,7 +602,7 @@
       },
       "summary": {
         "document": {
-          "del": 6658,
+          "del": 6657,
           "ins": 17787
         },
         "footers": {

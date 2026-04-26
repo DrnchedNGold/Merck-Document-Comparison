@@ -351,6 +351,35 @@ def _prevention_headings_match(orig_txt: str, rev_txt: str) -> bool:
     return _is_prevention_section_heading_text(rev_txt)
 
 
+def _short_heading_suffix_rewrite_match(orig_txt: str, rev_txt: str) -> bool:
+    """
+    True for short heading rewrites that preserve the original title as a suffix.
+
+    This targets sponsor headings like ``Pathophysiology`` → ``Differences in
+    Pathophysiology`` after nearby blank-paragraph drift pulls LCS off the
+    direct match. Keep it narrow so normal body paragraphs do not get re-paired.
+    """
+
+    os = orig_txt.strip()
+    rs = rev_txt.strip()
+    if not os or not rs or os == rs:
+        return False
+    if any(ch in os or ch in rs for ch in ("\n", "\t", ".", ":", ";")):
+        return False
+
+    ow = [t.norm_key() for t in tokenize_for_lcs(os) if re.search(r"\w", t.surface)]
+    rw = [t.norm_key() for t in tokenize_for_lcs(rs) if re.search(r"\w", t.surface)]
+    if not ow or not rw:
+        return False
+    if len(ow) > 4 or len(rw) > 8 or len(rw) <= len(ow):
+        return False
+    if rw[-len(ow) :] != ow:
+        return False
+
+    char_r = difflib.SequenceMatcher(None, os, rs, autojunk=False).ratio()
+    return char_r >= 0.62
+
+
 def _first_prevention_heading_index_in_rev_run(
     rev_run: list[int],
     r_ptr: int,
@@ -473,6 +502,49 @@ def _try_repair_scrum138_orig_rev_block(
     return out
 
 
+def _try_repair_short_heading_suffix_orig_rev_block(
+    orig_run: list[int],
+    rev_run: list[int],
+    original: BodyIR,
+    revised: BodyIR,
+    config: CompareConfig,
+) -> list[ParagraphAlignment] | None:
+    """
+    Re-pair short heading rewrites inside an orig-only run followed by a rev-only run.
+
+    Example from the cervical corpus:
+    ``Pathophysiology`` → ``Differences in Pathophysiology``.
+    """
+
+    ob = original.get("blocks", [])
+    rb = revised.get("blocks", [])
+    if len(rev_run) != 1 or not orig_run:
+        return None
+
+    rj = rev_run[0]
+    if rj >= len(rb) or rb[rj].get("type") != "paragraph":
+        return None
+    rev_txt = _block_alignment_text(revised, rj, config)
+
+    match_pos: int | None = None
+    for pos, oi in enumerate(orig_run):
+        if oi >= len(ob) or ob[oi].get("type") != "paragraph":
+            return None
+        orig_txt = _block_alignment_text(original, oi, config)
+        if _short_heading_suffix_rewrite_match(orig_txt, rev_txt):
+            if match_pos is not None:
+                return None
+            match_pos = pos
+
+    if match_pos is None:
+        return None
+
+    out: list[ParagraphAlignment] = []
+    for pos, oi in enumerate(orig_run):
+        out.append(ParagraphAlignment(oi, rj if pos == match_pos else None))
+    return out
+
+
 def _repair_alignment_orig_delete_block_then_rev_insert_merge(
     alignment: list[ParagraphAlignment],
     original: BodyIR,
@@ -534,6 +606,10 @@ def _repair_alignment_orig_delete_block_then_rev_insert_merge(
         repaired = _try_repair_scrum138_orig_rev_block(
             orig_run, rev_run, original, revised, config
         )
+        if repaired is None:
+            repaired = _try_repair_short_heading_suffix_orig_rev_block(
+                orig_run, rev_run, original, revised, config
+            )
         if repaired is not None:
             out.extend(repaired)
             i = k
