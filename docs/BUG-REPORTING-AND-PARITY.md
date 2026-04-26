@@ -48,12 +48,12 @@ That bundle is enough to **reproduce** the issue and split work into tasks (alig
 
 ## Mapping common complaints to how we triage them
 
-| What you observe | How we use it |
-|------------------|----------------|
-| Deletes text it should not | Likely **content / alignment / emit** — needs concrete location + repro pair + profile. |
-| “Corrects” more than necessary | Often **compare settings** (e.g. ignore formatting) or **alignment** — same: one example + profile JSON. |
-| Deletes parts of tables | **Table-specific** — we need **which table** (e.g. first table on page X, row/cell if possible). |
-| Adds text that is not there | **High priority** — exact snippet + clarify whether it appears in original, revised, or neither. |
+| What you observe                       | How we use it                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Deletes text it should not             | Likely **content / alignment / emit** — needs concrete location + repro pair + profile.                                              |
+| “Corrects” more than necessary         | Often **compare settings** (e.g. ignore formatting) or **alignment** — same: one example + profile JSON.                             |
+| Deletes parts of tables                | **Table-specific** — we need **which table** (e.g. first table on page X, row/cell if possible).                                     |
+| Adds text that is not there            | **High priority** — exact snippet + clarify whether it appears in original, revised, or neither.                                     |
 | Settings are confusing / not like Word | **Separate UX / product task** — list what Word offers that you need (e.g. moves, tables, whitespace) and what is unclear in our UI. |
 
 You do **not** have to run **Word’s compare** between our output and the sample reference document unless you want extra context. It is **optional**; the five items above are enough.

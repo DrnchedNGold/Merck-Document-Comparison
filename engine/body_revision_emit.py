@@ -860,7 +860,44 @@ def _new_w_p_toc_insert_from_revised_source(
             ins_el.append(copy.deepcopy(ch))
     if len(ins_el):
         p_out.append(ins_el)
+    _mark_paragraph_mark_as_inserted(
+        p_out,
+        id_counter=id_counter,
+        author=author,
+        date_iso=date_iso,
+    )
     return p_out
+
+
+def _mark_paragraph_mark_as_inserted(
+    p_el: ET.Element,
+    *,
+    id_counter: list[int],
+    author: str,
+    date_iso: str,
+) -> None:
+    """Mark the paragraph mark itself as inserted so Word can track paragraph-level structure."""
+
+    ppr = p_el.find("w:pPr", NS)
+    if ppr is None:
+        ppr = ET.Element(f"{{{WORD_NAMESPACE}}}pPr")
+        p_el.insert(0, ppr)
+    rpr = ppr.find("w:rPr", NS)
+    if rpr is None:
+        rpr = ET.Element(f"{{{WORD_NAMESPACE}}}rPr")
+        ppr.append(rpr)
+    if rpr.find("w:ins", NS) is not None:
+        return
+    rpr.append(
+        ET.Element(
+            f"{{{WORD_NAMESPACE}}}ins",
+            {
+                f"{{{WORD_NAMESPACE}}}id": _next_id(id_counter),
+                f"{{{WORD_NAMESPACE}}}author": author,
+                f"{{{WORD_NAMESPACE}}}date": date_iso,
+            },
+        )
+    )
 
 
 def _replace_toc_paragraph_with_del_preserving_layout(
@@ -3211,6 +3248,17 @@ def _copy_revised_p_pr_to_inserted_paragraph(new_p: ET.Element, rev_p: ET.Elemen
     new_p.insert(0, copy.deepcopy(rev_ppr))
 
 
+def _replace_p_pr_from_revised(orig_p: ET.Element, rev_p: ET.Element) -> None:
+    """Replace ``orig_p`` paragraph properties with the revised paragraph properties."""
+
+    existing = orig_p.find("w:pPr", NS)
+    if existing is not None:
+        orig_p.remove(existing)
+    rev_ppr = rev_p.find("w:pPr", NS)
+    if rev_ppr is not None:
+        orig_p.insert(0, copy.deepcopy(rev_ppr))
+
+
 def _paragraph_plain_text(p_el: ET.Element) -> str:
     return "".join((t.text or "") for t in p_el.findall(".//w:t", NS))
 
@@ -3603,30 +3651,83 @@ def _apply_track_changes_to_structural_container(
             if _local_name(el.tag) != "p":
                 continue
             orig_para: BodyParagraph = oblock  # type: ignore[assignment]
-            split_pairs: list[tuple[BodyParagraph, BodyParagraph]] | None = None
+            split_ops: list[tuple[str, BodyParagraph | None, BodyParagraph]] | None = None
             split_rev_elements: list[ET.Element | None] = []
             if merge_end is not None:
                 revised_span = [
                     rb[k] for k in range(rj, merge_end) if rb[k].get("type") == "paragraph"
                 ]
                 if len(revised_span) == (merge_end - rj):
-                    split_pairs = _split_original_paragraph_for_revised_span(
+                    split_ops = _plan_original_paragraph_for_revised_span(
                         orig_para,
                         revised_span,  # type: ignore[arg-type]
                         config,
                     )
-                    if split_pairs is not None:
+                    if split_ops is not None:
                         for k in range(rj, merge_end):
                             rev_el: ET.Element | None = None
                             if (
                                 revised_block_elements is not None
                                 and k < len(revised_block_elements)
                                 and _local_name(revised_block_elements[k].tag) == "p"
-                            ):
-                                rev_el = revised_block_elements[k]
+                                ):
+                                    rev_el = revised_block_elements[k]
                             split_rev_elements.append(rev_el)
-            if split_pairs is not None:
-                first_orig, first_rev = split_pairs[0]
+            if split_ops is not None:
+                first_match_idx = next(
+                    (
+                        idx
+                        for idx, (kind, extra_orig, _) in enumerate(split_ops)
+                        if kind == "match" and extra_orig is not None
+                    ),
+                    None,
+                )
+                if first_match_idx is None:
+                    continue
+                insert_at = list(container).index(el)
+                for lead_idx, (kind, _, extra_rev) in enumerate(split_ops[:first_match_idx]):
+                    if kind != "insert":
+                        continue
+                    revised_p_el = (
+                        split_rev_elements[lead_idx] if lead_idx < len(split_rev_elements) else None
+                    )
+                    if not _revised_only_paragraph_should_emit(
+                        extra_rev,
+                        config,
+                        revised_p_el=revised_p_el,
+                    ):
+                        continue
+                    if revised_p_el is not None and _paragraph_style_is_toc(revised_p_el):
+                        lead_p = _new_w_p_toc_insert_from_revised_source(
+                            revised_p_el,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                        )
+                    else:
+                        lead_p = _new_w_p_from_full_paragraph_insert(
+                            extra_rev,
+                            config,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                            revised_p_el=revised_p_el,
+                        )
+                    if revised_p_el is not None:
+                        _copy_revised_p_pr_to_inserted_paragraph(lead_p, revised_p_el)
+                        _mark_paragraph_mark_as_inserted(
+                            lead_p,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                        )
+                    container.insert(insert_at, lead_p)
+                    insert_at += 1
+
+                first_kind, first_orig, first_rev = split_ops[first_match_idx]
+                first_rev_el = (
+                    split_rev_elements[first_match_idx] if first_match_idx < len(split_rev_elements) else None
+                )
                 if _paragraph_needs_revision(first_orig, first_rev, config):
                     first_kids = build_paragraph_track_change_elements(
                         first_orig,
@@ -3635,22 +3736,67 @@ def _apply_track_changes_to_structural_container(
                         id_counter=id_counter,
                         author=author,
                         date_iso=date_iso,
-                        revised_p_el=split_rev_elements[0] if split_rev_elements else None,
+                        revised_p_el=first_rev_el,
                     )
+                    if _split_first_matched_para_should_take_revised_p_pr(
+                        first_orig,
+                        first_rev,
+                        config,
+                        first_rev_el,
+                    ):
+                        _replace_p_pr_from_revised(el, first_rev_el)
                     _replace_p_content_preserving_p_pr(el, first_kids)
                 insert_at = list(container).index(el) + 1
-                for extra_idx, (extra_orig, extra_rev) in enumerate(split_pairs[1:], start=1):
-                    extra_p = _new_w_p_from_matched_paragraph_diff(
-                        extra_orig,
-                        extra_rev,
-                        config,
-                        id_counter=id_counter,
-                        author=author,
-                        date_iso=date_iso,
-                        revised_p_el=split_rev_elements[extra_idx]
-                        if extra_idx < len(split_rev_elements)
-                        else None,
+                for extra_idx, (kind, extra_orig, extra_rev) in enumerate(
+                    split_ops[first_match_idx + 1 :],
+                    start=first_match_idx + 1,
+                ):
+                    revised_p_el = (
+                        split_rev_elements[extra_idx] if extra_idx < len(split_rev_elements) else None
                     )
+                    if kind == "insert":
+                        if not _revised_only_paragraph_should_emit(
+                            extra_rev,
+                            config,
+                            revised_p_el=revised_p_el,
+                        ):
+                            continue
+                        if revised_p_el is not None and _paragraph_style_is_toc(revised_p_el):
+                            extra_p = _new_w_p_toc_insert_from_revised_source(
+                                revised_p_el,
+                                id_counter=id_counter,
+                                author=author,
+                                date_iso=date_iso,
+                            )
+                        else:
+                            extra_p = _new_w_p_from_full_paragraph_insert(
+                                extra_rev,
+                                config,
+                                id_counter=id_counter,
+                                author=author,
+                                date_iso=date_iso,
+                                revised_p_el=revised_p_el,
+                            )
+                        if revised_p_el is not None:
+                            _copy_revised_p_pr_to_inserted_paragraph(extra_p, revised_p_el)
+                            _mark_paragraph_mark_as_inserted(
+                                extra_p,
+                                id_counter=id_counter,
+                                author=author,
+                                date_iso=date_iso,
+                            )
+                    else:
+                        if extra_orig is None:
+                            continue
+                        extra_p = _new_w_p_from_matched_paragraph_diff(
+                            extra_orig,
+                            extra_rev,
+                            config,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                            revised_p_el=revised_p_el,
+                        )
                     container.insert(insert_at, extra_p)
                     insert_at += 1
                 continue
@@ -3801,6 +3947,12 @@ def _apply_track_changes_to_structural_container(
                 )
             if rev_el is not None:
                 _copy_revised_p_pr_to_inserted_paragraph(new_p, rev_el)
+                _mark_paragraph_mark_as_inserted(
+                    new_p,
+                    id_counter=id_counter,
+                    author=author,
+                    date_iso=date_iso,
+                )
             container.insert(idx, new_p)
             rev_insert_count += 1
 
@@ -3826,6 +3978,162 @@ def _replace_p_content_preserving_p_pr(p_el: ET.Element, new_children: list[ET.E
             break
     for i, node in enumerate(new_children):
         p_el.insert(insert_at + i, node)
+
+
+def _split_first_matched_para_should_take_revised_p_pr(
+    orig_para: BodyParagraph,
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+    revised_p_el: ET.Element | None,
+) -> bool:
+    """Detect inline-heading to numbered-heading promotions for split matched paragraphs."""
+
+    if revised_p_el is None:
+        return False
+    rev_style = _p_paragraph_style_id(revised_p_el) or ""
+    if not rev_style.startswith("Heading"):
+        return False
+    orig_text = _concat_paragraph_text(orig_para, config).strip()
+    rev_text = _concat_paragraph_text(rev_para, config).strip()
+    if not rev_text:
+        return False
+    return orig_text == f"{rev_text}:"
+
+
+def _is_short_structural_insert_paragraph(
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+) -> bool:
+    """Heuristic for short structural lead-ins inserted between split body chunks."""
+
+    txt = _concat_paragraph_text(rev_para, config).strip()
+    if not txt or len(txt) > 120:
+        return False
+    if any(ch in txt for ch in (".", "!", "?", ":", "\n", "\t")):
+        return False
+    words = [t.surface for t in tokenize_for_lcs(txt) if re.search(r"\w", t.surface)]
+    return 1 <= len(words) <= 12
+
+
+def _next_revised_anchor_in_original(
+    orig_text: str,
+    revised_paras: list[BodyParagraph],
+    config: CompareConfig,
+    *,
+    start_index: int,
+    start_at: int,
+    allow_equal: bool = False,
+) -> tuple[int, int] | None:
+    """First later revised paragraph whose leading prefix re-anchors in ``orig_text``."""
+
+    for idx in range(start_index, len(revised_paras)):
+        rev_text = _concat_paragraph_text(revised_paras[idx], config)
+        pos = _find_revised_paragraph_anchor_in_original(
+            orig_text,
+            rev_text,
+            start_at=start_at,
+            allow_equal=allow_equal,
+        )
+        if pos is not None and (allow_equal or pos > start_at):
+            return idx, pos
+    return None
+
+
+def _plan_original_paragraph_for_revised_span(
+    orig_para: BodyParagraph,
+    revised_paras: list[BodyParagraph],
+    config: CompareConfig,
+) -> list[tuple[str, BodyParagraph | None, BodyParagraph]] | None:
+    """
+    Expand one original paragraph into matched and inserted revised paragraphs.
+
+    Returns operations shaped as ``("match", orig_chunk, rev_para)`` or
+    ``("insert", None, rev_para)``. This supports structural promotions where
+    one original inline-heading paragraph becomes a heading plus multiple
+    revised-only structural lead-ins and re-anchored body paragraphs.
+    """
+
+    if len(revised_paras) <= 1:
+        return None
+    orig_text = _concat_paragraph_text(orig_para, config)
+    if not orig_text.strip():
+        return None
+
+    ops: list[tuple[str, BodyParagraph | None, BodyParagraph]] = []
+    current_lo = 0
+    ri = 0
+
+    heading_match = re.match(r"^\s*([A-Za-z][^:\n]{0,120}?):\s+", orig_text)
+    if heading_match is not None:
+        first_rev_text = _concat_paragraph_text(revised_paras[0], config).strip()
+        heading_text = heading_match.group(1).strip()
+        if first_rev_text and first_rev_text == heading_text:
+            ops.append(("insert", None, revised_paras[0]))
+            ri = 1
+
+    while ri < len(revised_paras):
+        anchor = _next_revised_anchor_in_original(
+            orig_text,
+            revised_paras,
+            config,
+            start_index=ri,
+            start_at=current_lo,
+            allow_equal=True,
+        )
+        if anchor is None:
+            ops.append(
+                (
+                    "match",
+                    _paragraph_from_text_like(orig_para, orig_text[current_lo:]),
+                    revised_paras[ri],
+                )
+            )
+            current_lo = len(orig_text)
+            ri += 1
+            break
+
+        anchor_idx, anchor_pos = anchor
+        if anchor_idx > ri:
+            current_rev = revised_paras[ri]
+            if current_lo >= len(orig_text):
+                ops.append(("insert", None, current_rev))
+                ri += 1
+                continue
+            if (
+                _is_short_structural_insert_paragraph(current_rev, config)
+                or ops
+            ):
+                ops.append(("insert", None, current_rev))
+                ri += 1
+                continue
+            return None
+
+        later_anchor = _next_revised_anchor_in_original(
+            orig_text,
+            revised_paras,
+            config,
+            start_index=ri + 1,
+            start_at=max(anchor_pos, current_lo),
+            allow_equal=True,
+        )
+        hi = later_anchor[1] if later_anchor is not None else len(orig_text)
+        if hi <= current_lo:
+            return None
+        ops.append(
+            (
+                "match",
+                _paragraph_from_text_like(orig_para, orig_text[current_lo:hi]),
+                revised_paras[ri],
+            )
+        )
+        current_lo = hi
+        ri += 1
+
+    if not ops or all(kind != "match" for kind, _, _ in ops):
+        return None
+    if current_lo < len(orig_text):
+        return None
+    return ops
 
 
 def _empty_table_cell() -> dict:
@@ -4144,6 +4452,7 @@ def _find_revised_paragraph_anchor_in_original(
     revised_text: str,
     *,
     start_at: int,
+    allow_equal: bool = False,
 ) -> int | None:
     """
     Char offset where a later revised paragraph re-anchors inside *orig_text*.
@@ -4157,7 +4466,12 @@ def _find_revised_paragraph_anchor_in_original(
     if not prefix:
         return None
     pos = orig_text.find(prefix, start_at)
-    if pos <= 0:
+    if pos < 0:
+        return None
+    if allow_equal:
+        if pos < start_at:
+            return None
+    elif pos <= start_at:
         return None
     return pos
 
@@ -4179,8 +4493,20 @@ def _split_original_paragraph_for_revised_span(
         return None
     orig_text = _concat_paragraph_text(orig_para, config)
     split_points = [0]
-    search_start = 1
-    for rev_para in revised_paras[1:]:
+    later_revised = revised_paras[1:]
+    heading_match = re.match(r"^\s*([A-Za-z][^:\n]{0,120}?):\s+", orig_text)
+    if heading_match is not None:
+        first_rev_text = _concat_paragraph_text(revised_paras[0], config).strip()
+        heading_text = heading_match.group(1).strip()
+        if first_rev_text and first_rev_text == heading_text:
+            split_points.append(heading_match.end())
+            later_revised = revised_paras[2:]
+            search_start = heading_match.end()
+        else:
+            search_start = 1
+    else:
+        search_start = 1
+    for rev_para in later_revised:
         rev_text = _concat_paragraph_text(rev_para, config)
         pos = _find_revised_paragraph_anchor_in_original(
             orig_text,
@@ -4280,6 +4606,12 @@ def _new_w_p_from_full_paragraph_insert(
     p_el = ET.Element(f"{{{WORD_NAMESPACE}}}p")
     if revised_p_el is not None:
         _copy_revised_p_pr_to_inserted_paragraph(p_el, revised_p_el)
+        _mark_paragraph_mark_as_inserted(
+            p_el,
+            id_counter=id_counter,
+            author=author,
+            date_iso=date_iso,
+        )
         runs = _paragraph_w_runs_in_document_order(revised_p_el)
         if runs:
             p_el.append(
@@ -4295,6 +4627,12 @@ def _new_w_p_from_full_paragraph_insert(
         _empty_body_paragraph(),
         rev_para,
         config,
+        id_counter=id_counter,
+        author=author,
+        date_iso=date_iso,
+    )
+    _mark_paragraph_mark_as_inserted(
+        p_el,
         id_counter=id_counter,
         author=author,
         date_iso=date_iso,
