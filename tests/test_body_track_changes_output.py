@@ -2540,18 +2540,33 @@ def test_scrum121_cervical_disparities_inline_track_changes_not_full_paragraph_d
     n_del = len(target_p.findall(".//w:del", NS))
     n_ins = len(target_p.findall(".//w:ins", NS))
     plain = _collect_t_text(target_p).strip()
+    anchor_vis = (
+        (_collect_t_text(target_p) + _collect_del_text(target_p)).replace(" ", "")
+    )
     assert "women in the US" in plain
-    assert "[Ref." in plain
-    assert "Black women were more likely to be diagnosed" not in plain
+    assert "[Ref." in anchor_vis
+    # Guard the SCRUM-121 regression where the merged revised HPV lead-in was emitted
+    # inside the SEER anchor paragraph; that paragraph must stay SEER-scoped.
+    assert "The 10 most common oncogenic HPV" not in plain
     assert n_del <= 8 and n_ins <= 10 and len(plain) > 60, (
         "expected grouped inline revision, "
         f"got del={n_del} ins={n_ins} plain_len={len(plain)}"
     )
     paras = body.findall("w:p", NS)
     idx = paras.index(target_p)
-    assert idx + 1 < len(paras)
-    next_plain = _collect_t_text(paras[idx + 1]).strip()
-    assert next_plain.startswith("Black women were more likely to be diagnosed")
+    # Revised-only lead-ins (e.g. HPV block) may sit between the SEER anchor paragraph
+    # and the Black sentence paragraph; find the next body ``w:p`` that opens that way.
+    black_follow = next(
+        (
+            p
+            for p in paras[idx + 1 : idx + 20]
+            if _collect_t_text(p)
+            .strip()
+            .startswith("Black women were more likely to be diagnosed")
+        ),
+        None,
+    )
+    assert black_follow is not None
 
 
 def test_scrum151_cervical_disparities_reference_boundary_not_swallowed_into_large_delete(

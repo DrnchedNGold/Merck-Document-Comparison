@@ -3685,12 +3685,17 @@ def _apply_track_changes_to_structural_container(
                 if first_match_idx is None:
                     continue
                 insert_at = list(container).index(el)
-                for lead_idx, (kind, _, extra_rev) in enumerate(split_ops[:first_match_idx]):
+                insert_emit_idx = 0
+                for lead_idx in range(first_match_idx):
+                    kind, _, extra_rev = split_ops[lead_idx]
                     if kind != "insert":
                         continue
                     revised_p_el = (
-                        split_rev_elements[lead_idx] if lead_idx < len(split_rev_elements) else None
+                        split_rev_elements[insert_emit_idx]
+                        if insert_emit_idx < len(split_rev_elements)
+                        else None
                     )
+                    insert_emit_idx += 1
                     if not _revised_only_paragraph_should_emit(
                         extra_rev,
                         config,
@@ -3725,19 +3730,78 @@ def _apply_track_changes_to_structural_container(
                     insert_at += 1
 
                 first_kind, first_orig, first_rev = split_ops[first_match_idx]
-                first_rev_el = (
-                    split_rev_elements[first_match_idx] if first_match_idx < len(split_rev_elements) else None
+                first_inserts_before = sum(
+                    1 for i in range(first_match_idx) if split_ops[i][0] == "insert"
                 )
-                if _paragraph_needs_revision(first_orig, first_rev, config):
-                    first_kids = build_paragraph_track_change_elements(
-                        first_orig,
-                        first_rev,
-                        config,
+                first_rev_el = None
+                tail_plain = _concat_paragraph_text(first_orig, config)
+                rev_plain = _concat_paragraph_text(first_rev, config)
+                if tail_plain == rev_plain:
+                    first_rev_el = None
+                elif rev_plain.strip():
+                    if first_inserts_before < len(split_rev_elements):
+                        first_rev_el = split_rev_elements[first_inserts_before]
+                orig_full_text = _concat_paragraph_text(orig_para, config)
+                if tail_plain and orig_full_text.endswith(tail_plain):
+                    prefix_lo = len(orig_full_text) - len(tail_plain)
+                else:
+                    prefix_lo = orig_full_text.find(tail_plain) if tail_plain else 0
+                    if prefix_lo < 0:
+                        prefix_lo = 0
+                prefix_kids: list[ET.Element] = []
+                if prefix_lo > 0:
+                    pre = orig_full_text[:prefix_lo]
+                    prefix_kids = _track_change_elements_for_concat_texts(
+                        pre,
+                        pre,
                         id_counter=id_counter,
                         author=author,
                         date_iso=date_iso,
-                        revised_p_el=first_rev_el,
                     )
+                needs_tail_tc = _paragraph_needs_revision(first_orig, first_rev, config)
+                if prefix_kids or needs_tail_tc:
+                    # SCRUM-121: two revised ``w:p`` (HPV lead-in + Black sentence) merged to one
+                    # original SEER paragraph — delete the original tail here and emit the revised
+                    # Black block as its own following ``w:p`` (sponsor paragraph split).
+                    split_merge_two_rev_tail_boundary = (
+                        merge_end is not None
+                        and (merge_end - rj) == 2
+                        and len(split_ops) == 2
+                        and split_ops[0][0] == "insert"
+                        and split_ops[1][0] == "match"
+                        and first_match_idx == 1
+                        and bool(prefix_kids)
+                    )
+                    if split_merge_two_rev_tail_boundary and needs_tail_tc:
+                        tail_kids = build_paragraph_track_change_elements(
+                            first_orig,
+                            empty_rev,
+                            config,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                            source_p_el=el,
+                        )
+                    elif needs_tail_tc:
+                        tail_kids = build_paragraph_track_change_elements(
+                            first_orig,
+                            first_rev,
+                            config,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                            source_p_el=el,
+                            revised_p_el=first_rev_el,
+                        )
+                    else:
+                        tail_kids = _track_change_elements_for_concat_texts(
+                            tail_plain,
+                            tail_plain,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                        )
+                    first_kids = prefix_kids + tail_kids
                     if _split_first_matched_para_should_take_revised_p_pr(
                         first_orig,
                         first_rev,
@@ -3746,14 +3810,51 @@ def _apply_track_changes_to_structural_container(
                     ):
                         _replace_p_pr_from_revised(el, first_rev_el)
                     _replace_p_content_preserving_p_pr(el, first_kids)
-                insert_at = list(container).index(el) + 1
+                    insert_at = list(container).index(el) + 1
+                    if (
+                        split_merge_two_rev_tail_boundary
+                        and needs_tail_tc
+                        and first_rev_el is not None
+                        and _revised_only_paragraph_should_emit(
+                            first_rev,
+                            config,
+                            revised_p_el=first_rev_el,
+                        )
+                    ):
+                        black_p = _new_w_p_from_full_paragraph_insert(
+                            first_rev,
+                            config,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                            revised_p_el=first_rev_el,
+                        )
+                        _copy_revised_p_pr_to_inserted_paragraph(black_p, first_rev_el)
+                        _mark_paragraph_mark_as_inserted(
+                            black_p,
+                            id_counter=id_counter,
+                            author=author,
+                            date_iso=date_iso,
+                        )
+                        container.insert(insert_at, black_p)
+                        insert_at += 1
+                else:
+                    insert_at = list(container).index(el) + 1
                 for extra_idx, (kind, extra_orig, extra_rev) in enumerate(
                     split_ops[first_match_idx + 1 :],
                     start=first_match_idx + 1,
                 ):
-                    revised_p_el = (
-                        split_rev_elements[extra_idx] if extra_idx < len(split_rev_elements) else None
+                    ins_before = sum(
+                        1 for i in range(extra_idx) if split_ops[i][0] == "insert"
                     )
+                    revised_p_el = None
+                    if kind == "insert" or (
+                        kind == "match"
+                        and extra_rev is not None
+                        and _concat_paragraph_text(extra_rev, config).strip()
+                    ):
+                        if ins_before < len(split_rev_elements):
+                            revised_p_el = split_rev_elements[ins_before]
                     if kind == "insert":
                         if not _revised_only_paragraph_should_emit(
                             extra_rev,
@@ -3802,8 +3903,15 @@ def _apply_track_changes_to_structural_container(
                 continue
             rev_para: BodyParagraph = rev_para_for_diff
             rev_el_for_match: ET.Element | None = None
+            merged_rev_para_count = (
+                (merge_end - rj) if merge_end is not None else 0
+            )
+            # Merged IR can concatenate several revised ``w:p`` bodies; the first DOM
+            # node alone does not cover that text — run-preserving emit would skew
+            # inserts/deletes (SCRUM-121). Single-paragraph merges still pair 1:1.
             if (
-                revised_block_elements is not None
+                merged_rev_para_count <= 1
+                and revised_block_elements is not None
                 and rj < len(revised_block_elements)
                 and _local_name(revised_block_elements[rj].tag) == "p"
             ):
@@ -4039,6 +4147,89 @@ def _next_revised_anchor_in_original(
     return None
 
 
+def _rev_para_leading_prefix_appears_in_original_text(
+    orig_text: str,
+    rev_para: BodyParagraph,
+    config: CompareConfig,
+) -> bool:
+    """True when a leading word prefix of *rev_para* appears inside *orig_text*."""
+
+    rt = _concat_paragraph_text(rev_para, config)
+    prefix = _leading_word_prefix(rt, n_words=_MERGED_PARA_SPLIT_PREFIX_WORDS).strip()
+    if not prefix:
+        core = rt.strip()
+        return bool(core and core.lower() in orig_text.lower())
+    return prefix.lower() in orig_text.lower()
+
+
+def _plan_original_ops_emit_safe(
+    ops: list[tuple[str, BodyParagraph | None, BodyParagraph]],
+    config: CompareConfig,
+) -> bool:
+    """Reject planner output that would match an empty original slice to revised text."""
+
+    for kind, o, _r in ops:
+        if kind == "match" and o is not None and not _concat_paragraph_text(o, config).strip():
+            return False
+    return True
+
+
+def _plan_first_match_aligns_with_orig_prefix(
+    ops: list[tuple[str, BodyParagraph | None, BodyParagraph]],
+    orig_text: str,
+    config: CompareConfig,
+) -> bool:
+    """
+    When a **non–short-structural** revised paragraph is inserted before the first
+    ``match`` (e.g. SCRUM-121 HPV lead-in), validate that each ``match`` orig
+    slice is a real substring of ``orig_text`` in order.
+
+    The first ``match`` may start **after** a gap in ``orig_text`` (prefix covered
+    by the leading revised-only insert in the split-merge sense); later ``match``
+    ops must be contiguous in ``orig_text`` after that first span.
+    """
+
+    if not (
+        ops
+        and ops[0][0] == "insert"
+        and ops[0][2] is not None
+        and not _is_short_structural_insert_paragraph(ops[0][2], config)
+    ):
+        return True
+
+    skip = 0
+    hm = re.match(r"^\s*([A-Za-z][^:\n]{0,120}?):\s+", orig_text)
+    if (
+        hm
+        and ops
+        and ops[0][0] == "insert"
+        and ops[0][1] is None
+        and ops[0][2] is not None
+    ):
+        ft = _concat_paragraph_text(ops[0][2], config).strip()
+        if ft == hm.group(1).strip():
+            skip = hm.end()
+    pos = skip
+    first_match = True
+    for kind, o, _r in ops:
+        if kind != "match" or o is None:
+            continue
+        chunk = _concat_paragraph_text(o, config)
+        if first_match:
+            k = orig_text.find(chunk, pos)
+            if k < 0 or k + len(chunk) > len(orig_text):
+                return False
+            if orig_text[k : k + len(chunk)] != chunk:
+                return False
+            pos = k + len(chunk)
+            first_match = False
+        else:
+            if pos + len(chunk) > len(orig_text) or orig_text[pos : pos + len(chunk)] != chunk:
+                return False
+            pos += len(chunk)
+    return True
+
+
 def _plan_original_paragraph_for_revised_span(
     orig_para: BodyParagraph,
     revised_paras: list[BodyParagraph],
@@ -4081,6 +4272,11 @@ def _plan_original_paragraph_for_revised_span(
             allow_equal=True,
         )
         if anchor is None:
+            if current_lo >= len(orig_text):
+                while ri < len(revised_paras):
+                    ops.append(("insert", None, revised_paras[ri]))
+                    ri += 1
+                break
             ops.append(
                 (
                     "match",
@@ -4094,19 +4290,26 @@ def _plan_original_paragraph_for_revised_span(
 
         anchor_idx, anchor_pos = anchor
         if anchor_idx > ri:
-            current_rev = revised_paras[ri]
-            if current_lo >= len(orig_text):
-                ops.append(("insert", None, current_rev))
-                ri += 1
-                continue
-            if (
-                _is_short_structural_insert_paragraph(current_rev, config)
-                or ops
-            ):
-                ops.append(("insert", None, current_rev))
-                ri += 1
-                continue
-            return None
+            # ``revised_paras[anchor_idx]`` re-anchors at *anchor_pos*. Leading
+            # ``[ri, anchor_idx)`` are inserts (they do not consume ``orig_text``).
+            for k in range(ri, anchor_idx):
+                current_rev = revised_paras[k]
+                if current_lo >= len(orig_text):
+                    ops.append(("insert", None, current_rev))
+                    continue
+                if (
+                    _is_short_structural_insert_paragraph(current_rev, config)
+                    or ops
+                    or not _rev_para_leading_prefix_appears_in_original_text(
+                        orig_text, current_rev, config
+                    )
+                ):
+                    ops.append(("insert", None, current_rev))
+                    continue
+                return None
+            ri = anchor_idx
+            current_lo = anchor_pos
+            continue
 
         later_anchor = _next_revised_anchor_in_original(
             orig_text,
@@ -4116,6 +4319,8 @@ def _plan_original_paragraph_for_revised_span(
             start_at=max(anchor_pos, current_lo),
             allow_equal=True,
         )
+        if later_anchor is None and ri + 1 < len(revised_paras):
+            return None
         hi = later_anchor[1] if later_anchor is not None else len(orig_text)
         if hi <= current_lo:
             return None
@@ -4132,6 +4337,10 @@ def _plan_original_paragraph_for_revised_span(
     if not ops or all(kind != "match" for kind, _, _ in ops):
         return None
     if current_lo < len(orig_text):
+        return None
+    if not _plan_first_match_aligns_with_orig_prefix(ops, orig_text, config):
+        return None
+    if not _plan_original_ops_emit_safe(ops, config):
         return None
     return ops
 
@@ -4468,6 +4677,11 @@ def _find_revised_paragraph_anchor_in_original(
     pos = orig_text.find(prefix, start_at)
     if pos < 0:
         return None
+    rpos = orig_text.rfind(prefix, start_at)
+    if rpos > pos:
+        # Prefer the last occurrence when the prefix appears earlier as a false
+        # sub-phrase (SCRUM-121 / split-merge re-anchor).
+        pos = rpos
     if allow_equal:
         if pos < start_at:
             return None
