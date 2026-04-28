@@ -43,7 +43,7 @@
       "by_part": {
         "word/document.xml": {
           "del": 431,
-          "ins": 631
+          "ins": 613
         },
         "word/footer1.xml": {
           "del": 0,
@@ -57,7 +57,7 @@
       "summary": {
         "document": {
           "del": 431,
-          "ins": 631
+          "ins": 613
         },
         "footers": {
           "del": 0,
@@ -377,7 +377,7 @@
       "by_part": {
         "word/document.xml": {
           "del": 6657,
-          "ins": 17787
+          "ins": 17786
         },
         "word/footer1.xml": {
           "del": 2,
@@ -603,7 +603,7 @@
       "summary": {
         "document": {
           "del": 6657,
-          "ins": 17787
+          "ins": 17786
         },
         "footers": {
           "del": 4,
@@ -665,7 +665,7 @@
       "by_part": {
         "word/document.xml": {
           "del": 1027,
-          "ins": 1814
+          "ins": 1810
         },
         "word/footer1.xml": {
           "del": 0,
@@ -759,7 +759,7 @@
       "summary": {
         "document": {
           "del": 1027,
-          "ins": 1814
+          "ins": 1810
         },
         "footers": {
           "del": 0,

@@ -751,6 +751,47 @@ def test_scrum155_cervical_environmental_block_splits_and_preserves_structure(
     )
 
 
+def test_scrum157_cervical_prevalence_age_cells_do_not_emit_leading_space_inserts(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-157: avoid underscore-like leading-space inserts in prevalence age cells."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum157_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    age_labels = {"<50y", "50-64y", "≥65y"}
+    seen = 0
+    for tc in body.findall(".//w:tbl//w:tr//w:tc[1]", NS):
+        plain = _collect_t_text(tc)
+        label = plain.strip()
+        if label not in age_labels:
+            continue
+        seen += 1
+        # No leading inserted spaces before the age label.
+        assert plain == label
+        ins_chunks = [
+            (t.text or "")
+            for t in tc.findall(".//w:ins//w:t", NS)
+            if (t.text or "").strip() == ""
+        ]
+        assert not ins_chunks
+    assert seen >= 3
+
+
 def test_build_paragraph_track_change_preserves_unchanged_date_year_suffix() -> None:
     """SCRUM-105: only changed date core should be revised; -2025 remains unchanged."""
     orig = _paragraph_block("Release Date:\t09-APR-2025")

@@ -12,6 +12,7 @@ from desktop.profiles import (
     ProfileFormatError,
     config_from_profile_payload,
     default_word_compatible_config,
+    load_profile_bundle,
     load_profile_json,
     profile_payload_from_config,
     save_profile_json,
@@ -31,9 +32,18 @@ def test_profile_payload_round_trip(tmp_path: Path) -> None:
         "detect_moves": False,
     }
     profile_path = tmp_path / "profile.json"
-    save_profile_json(profile_path, cfg, profile_name="My profile")
-    loaded = load_profile_json(profile_path)
+    word_opts = {"InsertedTextColor": -1, "TrackMoves": 0}
+    save_profile_json(
+        profile_path,
+        cfg,
+        profile_name="My profile",
+        word_track_changes_options=word_opts,
+    )
+    loaded, loaded_word_opts, name = load_profile_bundle(profile_path)
     assert loaded == cfg
+    assert int(loaded_word_opts["InsertedTextColor"]) == -1
+    assert int(loaded_word_opts["TrackMoves"]) == 0
+    assert name == "My profile"
 
 
 def test_profile_payload_contains_word_compatible_default_name() -> None:
