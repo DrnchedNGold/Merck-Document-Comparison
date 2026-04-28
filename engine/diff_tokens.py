@@ -5,10 +5,9 @@ Tokenization splits ``\\w+`` (Unicode word characters, including digits), each
 non-word non-space cluster (e.g. commas), and each ``\\s+`` run into separate
 tokens so ``16,18,31`` becomes ``16``, ``,``, ``18``, ``,``, ``31``.
 
-**Matching:** :meth:`DiffToken.norm_key` uses Unicode case-folding. Whitespace
-tokens still normalize, but tab-containing whitespace keeps a dedicated key so
-LCS does not align a tab stop with a plain space in headers/TOC-like lines.
-Surfaces preserve original casing and spacing for output.
+**Matching:** :meth:`DiffToken.norm_key` uses Unicode case-folding and maps any
+whitespace-only surface to a single space key so LCS aligns on normalized
+identity while **surfaces** preserve original casing and spacing for output.
 
 :class:`StructuredOrigToken` links each token to the source ``w:r`` for run-aware emit.
 
@@ -37,14 +36,10 @@ class DiffToken:
     end: int
 
     def norm_key(self) -> str:
-        """Lowercase / case-folded key for LCS with tab-aware whitespace matching."""
+        """Lowercase / case-folded key for LCS; whitespace runs collapse to one space."""
         if not self.surface:
             return ""
         if self.surface.isspace():
-            # Keep tab stop positions stable: matching "\t" to " " can duplicate/move
-            # tabs into revision markup and shift header/TOC layout.
-            if "\t" in self.surface:
-                return "\t"
             return " "
         return self.surface.casefold()
 

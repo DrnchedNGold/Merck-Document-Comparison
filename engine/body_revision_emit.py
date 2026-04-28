@@ -149,6 +149,23 @@ def _concat_paragraph_text(paragraph: BodyParagraph, config: CompareConfig) -> s
     )
 
 
+def _tc_norm_keys(tokens: list[DiffToken]) -> list[str]:
+    """
+    Track-change LCS keys with tab-aware whitespace handling.
+
+    Keep tab-containing whitespace distinct from plain spaces so inline emit
+    does not absorb a tab stop into inserted/deleted spans (header/TOC layout).
+    """
+
+    out: list[str] = []
+    for tok in tokens:
+        if tok.surface and tok.surface.isspace() and "\t" in tok.surface:
+            out.append("\t")
+        else:
+            out.append(tok.norm_key())
+    return out
+
+
 def _paragraph_w_runs_in_document_order(p_el: ET.Element) -> list[ET.Element]:
     """``w:r`` elements under ``w:p`` in document order (matches body ingest)."""
 
@@ -359,7 +376,7 @@ def _try_build_track_changes_preserving_orig_runs(
     struct_ot = structured_orig_tokens_from_aligned_runs(aligned, orig_cmp)
     ot = tokenize_for_lcs(orig_cmp)
     rt = tokenize_for_lcs(rev_text)
-    sm = difflib.SequenceMatcher(None, norm_keys(ot), norm_keys(rt), autojunk=False)
+    sm = difflib.SequenceMatcher(None, _tc_norm_keys(ot), _tc_norm_keys(rt), autojunk=False)
     maybe_log_lcs_debug("preserving_paragraph", ot, rt, sm)
     opcodes = sm.get_opcodes()
     opcodes = _collapse_adjacent_replace_opcodes(opcodes, ot, rt)
@@ -2647,7 +2664,7 @@ def _track_change_elements_for_concat_texts(
             _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
         ]
     matcher = difflib.SequenceMatcher(
-        None, norm_keys(orig_tokens), norm_keys(rev_tokens), autojunk=False
+        None, _tc_norm_keys(orig_tokens), _tc_norm_keys(rev_tokens), autojunk=False
     )
     sm_match_ratio = _word_token_similarity_ratio(orig_text, rev_text)
     opcodes = matcher.get_opcodes()
