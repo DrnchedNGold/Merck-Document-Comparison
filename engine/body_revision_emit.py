@@ -3847,6 +3847,30 @@ def _cell_paragraph_text(para: BodyParagraph) -> str:
     return "".join(str(r.get("text", "")) for r in para.get("runs", []))
 
 
+def _table_cell_leading_whitespace_only_change(orig_text: str, rev_text: str) -> bool:
+    """
+    True when revised differs from original only by short leading whitespace.
+
+    In some sponsor tables, revised cells can carry layout-only leading spaces
+    (for example before ``<50y`` / ``50-64y`` / ``>=65y`` labels). Emitting these
+    as inserted text creates visible redline noise (rendered like underscores in
+    Word). Treat this as formatting-only and keep cell text unchanged.
+    """
+
+    if not orig_text or not rev_text:
+        return False
+    if orig_text != orig_text.lstrip():
+        return False
+    trimmed_rev = rev_text.lstrip()
+    if trimmed_rev == rev_text:
+        return False
+    # Keep this narrow: ignore only short indentation-like prefixes.
+    lead = len(rev_text) - len(trimmed_rev)
+    if lead > 8:
+        return False
+    return trimmed_rev == orig_text
+
+
 def _cell_paragraph_alignment(
     orig_paras: list[BodyParagraph],
     rev_paras: list[BodyParagraph],
@@ -3974,6 +3998,8 @@ def _apply_table_cell_track_changes(
             return
         orig_text = "".join(str(r.get("text", "")) for r in orig_para.get("runs", []))
         rev_text = "".join(str(r.get("text", "")) for r in rev_para.get("runs", []))
+        if _table_cell_leading_whitespace_only_change(orig_text, rev_text):
+            return
         orig_words = norm_keys([x for x in tokenize_for_lcs(orig_text) if not x.surface.isspace()])
         rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
         word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
@@ -4060,6 +4086,9 @@ def _apply_table_cell_track_changes(
 
         orig_text = _cell_paragraph_text(orig_para)
         rev_text = _cell_paragraph_text(rev_para)
+        if _table_cell_leading_whitespace_only_change(orig_text, rev_text):
+            out_paras.append(p_el)
+            continue
         orig_words = norm_keys([x for x in tokenize_for_lcs(orig_text) if not x.surface.isspace()])
         rev_words = norm_keys([x for x in tokenize_for_lcs(rev_text) if not x.surface.isspace()])
         word_overlap = difflib.SequenceMatcher(None, orig_words, rev_words, autojunk=False).ratio()
