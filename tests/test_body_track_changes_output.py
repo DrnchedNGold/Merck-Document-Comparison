@@ -310,6 +310,87 @@ def test_build_paragraph_track_change_preserves_tab_between_label_and_value() ->
     assert "Version Number:2" not in plain_r_text
 
 
+def test_concat_track_change_does_not_move_header_tab_into_inserted_drug_name() -> None:
+    """SCRUM-152: keep the single header tab stop outside inserted drug-name text."""
+    orig = "MK-2870\tPAGE 10"
+    rev = "MK-2870 (SACITUZUMAB TIRUMOTECAN)\tPAGE 10"
+    els = _track_change_elements_for_concat_texts(
+        orig,
+        rev,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-28T00:00:00Z",
+    )
+    p_xml = ET.Element(f"{{{WORD_NS}}}p")
+    for el in els:
+        p_xml.append(el)
+    assert len(p_xml.findall(".//w:tab", NS)) == 1
+    ins = [e for e in els if _local_name(e.tag) == "ins"]
+    assert len(ins) == 1
+    assert len(ins[0].findall(".//w:tab", NS)) == 0
+    assert "SACITUZUMAB TIRUMOTECAN" in _collect_t_text(ins[0])
+
+
+def test_preserving_path_does_not_move_header_tab_into_inserted_drug_name() -> None:
+    """SCRUM-152: preserving emit must not duplicate/shift header tab stops."""
+    orig_para = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "MK-2870"}, {"text": "\t"}, {"text": "PAGE 10"}],
+    }
+    rev_para = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [
+            {"text": "MK-2870 "},
+            {"text": "(SACITUZUMAB TIRUMOTECAN)"},
+            {"text": "\t"},
+            {"text": "PAGE 10"},
+        ],
+    }
+    src_p = ET.Element(f"{{{WORD_NS}}}p")
+    src_r1 = ET.SubElement(src_p, f"{{{WORD_NS}}}r")
+    src_t1 = ET.SubElement(src_r1, f"{{{WORD_NS}}}t")
+    src_t1.text = "MK-2870"
+    src_r2 = ET.SubElement(src_p, f"{{{WORD_NS}}}r")
+    ET.SubElement(src_r2, f"{{{WORD_NS}}}tab")
+    src_r3 = ET.SubElement(src_p, f"{{{WORD_NS}}}r")
+    src_t3 = ET.SubElement(src_r3, f"{{{WORD_NS}}}t")
+    src_t3.text = "PAGE 10"
+
+    rev_p = ET.Element(f"{{{WORD_NS}}}p")
+    rev_r1 = ET.SubElement(rev_p, f"{{{WORD_NS}}}r")
+    rev_t1 = ET.SubElement(rev_r1, f"{{{WORD_NS}}}t")
+    rev_t1.text = "MK-2870 "
+    rev_r2 = ET.SubElement(rev_p, f"{{{WORD_NS}}}r")
+    rev_t2 = ET.SubElement(rev_r2, f"{{{WORD_NS}}}t")
+    rev_t2.text = "(SACITUZUMAB TIRUMOTECAN)"
+    rev_r3 = ET.SubElement(rev_p, f"{{{WORD_NS}}}r")
+    ET.SubElement(rev_r3, f"{{{WORD_NS}}}tab")
+    rev_r4 = ET.SubElement(rev_p, f"{{{WORD_NS}}}r")
+    rev_t4 = ET.SubElement(rev_r4, f"{{{WORD_NS}}}t")
+    rev_t4.text = "PAGE 10"
+
+    els = build_paragraph_track_change_elements(
+        orig_para,
+        rev_para,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-28T00:00:00Z",
+        source_p_el=src_p,
+        revised_p_el=rev_p,
+    )
+    p_xml = ET.Element(f"{{{WORD_NS}}}p")
+    for el in els:
+        p_xml.append(el)
+    assert len(p_xml.findall(".//w:tab", NS)) == 1
+    ins = [e for e in els if _local_name(e.tag) == "ins"]
+    assert len(ins) == 1
+    assert len(ins[0].findall(".//w:tab", NS)) == 0
+    assert "SACITUZUMAB TIRUMOTECAN" in _collect_t_text(ins[0])
+
+
 def test_build_paragraph_track_change_split_tab_run_with_ignore_whitespace() -> None:
     """SCRUM-105: tab-only runs must not disappear when ignore_whitespace=True."""
     cfg = dict(DEFAULT_WORD_LIKE_COMPARE_CONFIG)
