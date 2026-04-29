@@ -625,6 +625,51 @@ def test_toc_line_cervical_section_11_inline_title_diff_single_paragraph(tmp_pat
     )
 
 
+def test_toc_lines_cervical_1211_1212_are_insert_only(tmp_path: Path) -> None:
+    """New TOC lines 1.2.1.1 and 1.2.1.2 must emit as insert-only paragraphs."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "toc_1211_1212_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    toc_1211 = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if _collect_t_text(p).replace("\t", "") == "1.2.1.1HPV Infection12"
+        ),
+        None,
+    )
+    toc_1212 = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if _collect_t_text(p).replace("\t", "") == "1.2.1.2Environmental Factors12"
+        ),
+        None,
+    )
+
+    assert toc_1211 is not None
+    assert toc_1212 is not None
+    assert toc_1211.findall(".//w:ins", NS)
+    assert not toc_1211.findall(".//w:del", NS)
+    assert toc_1212.findall(".//w:ins", NS)
+    assert not toc_1212.findall(".//w:del", NS)
+
+
 def test_scrum156_cervical_heading3_rewrite_keeps_numbered_paragraph_inline(
     tmp_path: Path,
 ) -> None:
@@ -664,6 +709,127 @@ def test_scrum156_cervical_heading3_rewrite_keeps_numbered_paragraph_inline(
     assert _collect_t_text(target) == "Differences in Pathophysiology"
     assert len(target.findall(".//w:ins", NS)) == 1
     assert "".join(t.text or "" for t in target.findall(".//w:ins//w:t", NS)) == "Differences in "
+
+
+def test_scrum155_cervical_inline_heading_promotes_to_heading4(tmp_path: Path) -> None:
+    """SCRUM-155: inline italic heading should emit as revised Heading4, not stay a paragraph."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum155_cervical_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    heading_matches = []
+    paragraph_matches = []
+    for p in body.findall("w:p", NS):
+        visible = _paragraph_track_visible_text(p)
+        if "HPV Infection" not in visible:
+            continue
+        pstyle = p.find("w:pPr/w:pStyle", NS)
+        style_id = pstyle.get(f"{{{WORD_NS}}}val") if pstyle is not None else None
+        if style_id == "Heading4":
+            heading_matches.append(p)
+        if style_id == "Paragraph":
+            paragraph_matches.append(p)
+
+    assert len(heading_matches) == 1
+    target = heading_matches[0]
+    assert _collect_t_text(target) == "HPV Infection"
+    assert _collect_del_text(target) == ""
+    assert "".join(t.text or "" for t in target.findall(".//w:ins//w:t", NS)) == "HPV Infection"
+    assert target.find("w:pPr/w:rPr/w:ins", NS) is not None
+    assert not target.findall(".//w:i", NS)
+
+    body_following = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if _collect_t_text(p).startswith("A variety of HPV cofactors")
+        ),
+        None,
+    )
+    assert body_following is not None
+    assert body_following.findall(".//w:del", NS)
+
+
+def test_scrum155_cervical_environmental_block_splits_and_preserves_structure(
+    tmp_path: Path,
+) -> None:
+    """SCRUM-155: adjacent inline-heading block should split into separate structural paragraphs."""
+
+    repo = Path(__file__).resolve().parents[1]
+    v1 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version1.docx"
+    v2 = repo / "sample-docs/email1docs/diversity-plan-cervical-cancer-version2.docx"
+    if not v1.is_file() or not v2.is_file():
+        pytest.skip("cervical diversity sample docs not present")
+
+    out = tmp_path / "scrum155_cervical_environmental_compare.docx"
+    emit_docx_with_package_track_changes(
+        v1,
+        v2,
+        out,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+    )
+    root = load_word_document_xml_root(out)
+    body = root.find("w:body", NS)
+    assert body is not None
+
+    heading = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if (p.find("w:pPr/w:pStyle", NS) is not None)
+            and p.find("w:pPr/w:pStyle", NS).get(f"{{{WORD_NS}}}val") == "Heading4"
+            and _collect_t_text(p) == "Environmental Factors"
+        ),
+        None,
+    )
+    assert heading is not None
+    assert _collect_del_text(heading) == ""
+    assert "".join(t.text or "" for t in heading.findall(".//w:ins//w:t", NS)) == "Environmental Factors"
+    assert heading.find("w:pPr/w:rPr/w:ins", NS) is not None
+    assert not heading.findall(".//w:i", NS)
+
+    expected_standalone = {
+        "Socioeconomic Status, Immigrant Status, and Insurance Access",
+        "Coexisting Medical Conditions",
+        "Geographic Area",
+    }
+    seen_standalone = {
+        _collect_t_text(p)
+        for p in body.findall("w:p", NS)
+        if _collect_t_text(p) in expected_standalone
+    }
+    assert seen_standalone == expected_standalone
+
+    env_body = next(
+        (
+            p
+            for p in body.findall("w:p", NS)
+            if _collect_t_text(p).startswith(
+                "Environmental factors such as low socioeconomic status"
+            )
+        ),
+        None,
+    )
+    assert env_body is not None
+
+    assert not any(
+        "Environmental FactorsSocioeconomic Status" in _paragraph_track_visible_text(p)
+        for p in body.findall("w:p", NS)
+    )
 
 
 def test_scrum157_cervical_prevalence_age_cells_do_not_emit_leading_space_inserts(

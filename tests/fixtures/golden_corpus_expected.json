@@ -5,7 +5,7 @@
       "by_part": {
         "word/document.xml": {
           "del": 56,
-          "ins": 65
+          "ins": 70
         },
         "word/footer1.xml": {
           "del": 0,
@@ -27,7 +27,7 @@
       "summary": {
         "document": {
           "del": 56,
-          "ins": 65
+          "ins": 70
         },
         "footers": {
           "del": 0,
@@ -42,8 +42,8 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 439,
-          "ins": 549
+          "del": 431,
+          "ins": 613
         },
         "word/footer1.xml": {
           "del": 0,
@@ -56,8 +56,8 @@
       },
       "summary": {
         "document": {
-          "del": 439,
-          "ins": 549
+          "del": 431,
+          "ins": 613
         },
         "footers": {
           "del": 0,
@@ -73,7 +73,7 @@
       "by_part": {
         "word/document.xml": {
           "del": 20,
-          "ins": 15
+          "ins": 20
         },
         "word/footer1.xml": {
           "del": 0,
@@ -89,7 +89,7 @@
         },
         "word/header1.xml": {
           "del": 0,
-          "ins": 2
+          "ins": 4
         },
         "word/header2.xml": {
           "del": 2,
@@ -103,7 +103,7 @@
       "summary": {
         "document": {
           "del": 20,
-          "ins": 15
+          "ins": 20
         },
         "footers": {
           "del": 0,
@@ -111,7 +111,7 @@
         },
         "headers": {
           "del": 2,
-          "ins": 2
+          "ins": 4
         }
       }
     },
@@ -119,11 +119,11 @@
       "by_part": {
         "word/document.xml": {
           "del": 9844,
-          "ins": 14824
+          "ins": 14934
         },
         "word/footer1.xml": {
           "del": 0,
-          "ins": 2
+          "ins": 4
         },
         "word/footer2.xml": {
           "del": 2,
@@ -139,7 +139,7 @@
         },
         "word/header1.xml": {
           "del": 0,
-          "ins": 2
+          "ins": 4
         },
         "word/header10.xml": {
           "del": 2,
@@ -183,7 +183,7 @@
         },
         "word/header2.xml": {
           "del": 2,
-          "ins": 0
+          "ins": 1
         },
         "word/header20.xml": {
           "del": 2,
@@ -361,23 +361,23 @@
       "summary": {
         "document": {
           "del": 9844,
-          "ins": 14824
+          "ins": 14934
         },
         "footers": {
           "del": 2,
-          "ins": 2
+          "ins": 4
         },
         "headers": {
           "del": 98,
-          "ins": 2
+          "ins": 5
         }
       }
     },
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 6657,
-          "ins": 17786
+          "del": 6643,
+          "ins": 18289
         },
         "word/footer1.xml": {
           "del": 2,
@@ -485,55 +485,55 @@
         },
         "word/header1.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header10.xml": {
           "del": 1,
-          "ins": 1
+          "ins": 2
         },
         "word/header11.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header12.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header13.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header14.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header15.xml": {
           "del": 1,
-          "ins": 2
+          "ins": 3
         },
         "word/header16.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header17.xml": {
           "del": 1,
-          "ins": 2
+          "ins": 3
         },
         "word/header18.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header19.xml": {
           "del": 1,
-          "ins": 2
+          "ins": 3
         },
         "word/header2.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header20.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header21.xml": {
           "del": 1,
@@ -541,7 +541,7 @@
         },
         "word/header22.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header23.xml": {
           "del": 2,
@@ -577,33 +577,33 @@
         },
         "word/header4.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header5.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header6.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header7.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header8.xml": {
           "del": 0,
-          "ins": 1
+          "ins": 2
         },
         "word/header9.xml": {
           "del": 1,
-          "ins": 2
+          "ins": 3
         }
       },
       "summary": {
         "document": {
-          "del": 6657,
-          "ins": 17786
+          "del": 6643,
+          "ins": 18289
         },
         "footers": {
           "del": 4,
@@ -611,19 +611,19 @@
         },
         "headers": {
           "del": 20,
-          "ins": 27
+          "ins": 47
         }
       }
     },
     "email3-protocol-1026": {
       "by_part": {
         "word/document.xml": {
-          "del": 1054,
-          "ins": 1577
+          "del": 1056,
+          "ins": 1889
         },
         "word/footer1.xml": {
           "del": 0,
-          "ins": 2
+          "ins": 4
         },
         "word/footer2.xml": {
           "del": 2,
@@ -635,7 +635,7 @@
         },
         "word/header1.xml": {
           "del": 0,
-          "ins": 2
+          "ins": 4
         },
         "word/header2.xml": {
           "del": 2,
@@ -648,24 +648,24 @@
       },
       "summary": {
         "document": {
-          "del": 1054,
-          "ins": 1577
+          "del": 1056,
+          "ins": 1889
         },
         "footers": {
           "del": 2,
-          "ins": 2
+          "ins": 4
         },
         "headers": {
           "del": 2,
-          "ins": 2
+          "ins": 4
         }
       }
     },
     "email3-protocol-7902": {
       "by_part": {
         "word/document.xml": {
-          "del": 1027,
-          "ins": 1810
+          "del": 1028,
+          "ins": 2278
         },
         "word/footer1.xml": {
           "del": 0,
@@ -681,7 +681,7 @@
         },
         "word/footer2.xml": {
           "del": 0,
-          "ins": 2
+          "ins": 3
         },
         "word/footer3.xml": {
           "del": 0,
@@ -725,7 +725,7 @@
         },
         "word/header2.xml": {
           "del": 0,
-          "ins": 2
+          "ins": 4
         },
         "word/header3.xml": {
           "del": 0,
@@ -758,16 +758,16 @@
       },
       "summary": {
         "document": {
-          "del": 1027,
-          "ins": 1810
+          "del": 1028,
+          "ins": 2278
         },
         "footers": {
           "del": 0,
-          "ins": 2
+          "ins": 3
         },
         "headers": {
           "del": 0,
-          "ins": 2
+          "ins": 4
         }
       }
     }
