@@ -509,9 +509,103 @@ def test_toc_matched_line_track_change_keeps_shared_title_prefix_before_product_
         p_xml.append(el)
     assert len(p_xml.findall(".//w:tab", NS)) >= 2
     assert plain.startswith("2SCOPE OF MEDICAL PRODUCT DEVELOPMENT PROGRAM: ")
-    assert len(dels) == 1 and len(inses) == 1
+    assert len(dels) == 2 and len(inses) == 2
     assert "MK-2870" in _collect_del_text(dels[0])
     assert "sacituzumab tirumotecan" in _collect_t_text(inses[0])
+    assert _collect_del_text(dels[1]) == "11"
+    assert _collect_t_text(inses[1]) == "18"
+
+
+def test_concat_track_change_keeps_toc_title_and_page_replacements_separate() -> None:
+    """Tab-separated field boundaries should prevent title/page replaces from merging."""
+    orig = "MK-2870\t020........\t12"
+    rev = "TroFuse\t020........\t18"
+
+    els = _track_change_elements_for_concat_texts(
+        orig,
+        rev,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-29T00:00:00Z",
+    )
+
+    kinds = [_local_name(e.tag) for e in els]
+    assert kinds == ["del", "ins", "r", "r", "del", "ins"]
+    assert _collect_del_text(els[0]) == "MK-2870"
+    assert _collect_t_text(els[1]) == "TroFuse"
+    assert els[0].find(".//w:tab", NS) is not None
+    assert els[1].find(".//w:tab", NS) is not None
+    plain_runs = [e for e in els if _local_name(e.tag) == "r"]
+    assert "".join(_collect_t_text(e) for e in plain_runs) == "020........"
+    assert sum(1 for e in plain_runs if e.find(".//w:tab", NS) is not None) == 1
+    assert _collect_del_text(els[4]) == "12"
+    assert _collect_t_text(els[5]) == "18"
+
+
+def test_toc_matched_line_track_change_preserves_stable_numeric_suffix_inside_title() -> None:
+    """TOC title diff should keep the shared ``-020`` suffix plain while diffing the page separately."""
+    orig = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "2.2.1\tMK-2870-020\t12"}],
+    }
+    rev = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "2.2.1\tTroFuse-020\t18"}],
+    }
+
+    els = _build_toc_matched_line_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-29T00:00:00Z",
+    )
+
+    kinds = [_local_name(e.tag) for e in els]
+    assert kinds == ["r", "r", "del", "ins", "r", "r", "del", "ins"]
+    assert _collect_t_text(els[0]) == "2.2.1"
+    assert els[1].find(".//w:tab", NS) is not None
+    assert _collect_del_text(els[2]) == "MK-2870"
+    assert _collect_t_text(els[3]) == "TroFuse"
+    assert _collect_t_text(els[4]) == "-020"
+    assert els[5].find(".//w:tab", NS) is not None
+    assert _collect_del_text(els[6]) == "12"
+    assert _collect_t_text(els[7]) == "18"
+
+
+def test_toc_matched_line_without_numeric_title_uses_existing_inline_behavior() -> None:
+    """Non-numeric TOC titles should keep the older full-line inline diff behavior."""
+    orig = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "1.2.2\tPrevention, Screening or Diagnostic Strategies\t10"}],
+    }
+    rev = {
+        "type": "paragraph",
+        "id": "p1",
+        "runs": [{"text": "1.2.2\tDifferences in Prevention, Screening, or Diagnostic Strategies\t13"}],
+    }
+
+    els = _build_toc_matched_line_track_change_elements(
+        orig,
+        rev,
+        DEFAULT_WORD_LIKE_COMPARE_CONFIG,
+        id_counter=[0],
+        author="Test",
+        date_iso="2026-04-29T00:00:00Z",
+    )
+
+    del_text = "".join(_collect_del_text(e) for e in els if _local_name(e.tag) == "del")
+    ins_text = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "ins")
+    plain_text = "".join(_collect_t_text(e) for e in els if _local_name(e.tag) == "r")
+
+    assert "Prevention, Screening or " not in del_text
+    assert "Differences in " in ins_text
+    assert "Prevention, Screening" in plain_text
+    assert "Diagnostic Strategies" in plain_text
 
 
 def test_heading2_title_diff_coalesce_preserves_long_shared_tail() -> None:

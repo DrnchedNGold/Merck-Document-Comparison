@@ -1,9 +1,10 @@
 """
 Word / punctuation / whitespace tokens for paragraph LCS diff (Track Changes emit).
 
-Tokenization splits ``\\w+`` (Unicode word characters, including digits), each
-non-word non-space cluster (e.g. commas), and each ``\\s+`` run into separate
-tokens so ``16,18,31`` becomes ``16``, ``,``, ``18``, ``,``, ``31``.
+Tokenization splits mixed product-code identifiers (e.g. ``MK-2870``), plain
+``\\w+`` spans (Unicode word characters, including digits), each non-word
+non-space cluster (e.g. commas), and each ``\\s+`` run into separate tokens so
+``16,18,31`` becomes ``16``, ``,``, ``18``, ``,``, ``31``.
 
 **Matching:** :meth:`DiffToken.norm_key` uses Unicode case-folding and maps any
 whitespace-only surface to a single space key so LCS aligns on normalized
@@ -23,8 +24,17 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
-# Word chars, punctuation (non-word, non-space), or whitespace runs.
-_DIFF_TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]+|\s+", re.UNICODE)
+# Sponsor-style identifiers like ``MK-2870`` should stay intact, but generic
+# word+number labels such as ``TroFuse-020`` should still split so stable
+# numeric suffixes can align independently. Dates such as ``09-APR-2025`` also
+# continue to fall back to smaller pieces.
+_MIXED_ALNUM_HYPHEN_TOKEN = r"(?:[A-Z]{1,10}-\d+|\d+-[A-Z]{1,10})(?!-\d)"
+
+# Mixed identifiers, word chars, punctuation (non-word, non-space), or whitespace runs.
+_DIFF_TOKEN_PATTERN = re.compile(
+    rf"{_MIXED_ALNUM_HYPHEN_TOKEN}|\w+|[^\w\s]+|\s+",
+    re.UNICODE,
+)
 
 
 @dataclass(frozen=True)

@@ -42,8 +42,8 @@
     "email1-cervical": {
       "by_part": {
         "word/document.xml": {
-          "del": 431,
-          "ins": 613
+          "del": 435,
+          "ins": 617
         },
         "word/footer1.xml": {
           "del": 0,
@@ -56,8 +56,8 @@
       },
       "summary": {
         "document": {
-          "del": 431,
-          "ins": 613
+          "del": 435,
+          "ins": 617
         },
         "footers": {
           "del": 0,

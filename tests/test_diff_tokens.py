@@ -29,6 +29,16 @@ def test_tokenize_preserves_whitespace_surface() -> None:
     assert norm_keys([t for t in toks if t.surface.isspace()]) == [" "]
 
 
+def test_tokenize_keeps_mixed_alnum_hyphen_identifier_intact() -> None:
+    toks = tokenize_for_lcs("MK-2870 020........12")
+    assert [t.surface for t in toks] == ["MK-2870", " ", "020", "........", "12"]
+
+
+def test_tokenize_splits_alpha_numeric_suffix_label_for_stable_number_alignment() -> None:
+    toks = tokenize_for_lcs("TroFuse-020")
+    assert [t.surface for t in toks] == ["TroFuse", "-", "020"]
+
+
 def test_norm_key_casefolds_words_not_whitespace_count() -> None:
     toks = tokenize_for_lcs("The CAT")
     keys = norm_keys(toks)
