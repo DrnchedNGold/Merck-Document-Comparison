@@ -3695,11 +3695,33 @@ def _apply_track_changes_to_structural_container(
                     rb[k] for k in range(rj, merge_end) if rb[k].get("type") == "paragraph"
                 ]
                 if len(revised_span) == (merge_end - rj):
-                    split_ops = _plan_original_paragraph_for_revised_span(
+                    if _revised_span_starts_with_heading_promotion(
                         orig_para,
                         revised_span,  # type: ignore[arg-type]
                         config,
-                    )
+                    ):
+                        split_ops = _plan_original_paragraph_for_revised_span(
+                            orig_para,
+                            revised_span,  # type: ignore[arg-type]
+                            config,
+                        )
+                    else:
+                        split_pairs = _split_original_paragraph_for_revised_span(
+                            orig_para,
+                            revised_span,  # type: ignore[arg-type]
+                            config,
+                        )
+                        if split_pairs is not None:
+                            split_ops = [
+                                ("match", split_orig, split_rev)
+                                for split_orig, split_rev in split_pairs
+                            ]
+                        else:
+                            split_ops = _plan_original_paragraph_for_revised_span(
+                                orig_para,
+                                revised_span,  # type: ignore[arg-type]
+                                config,
+                            )
                     if split_ops is not None:
                         for k in range(rj, merge_end):
                             rev_el: ET.Element | None = None
@@ -4171,6 +4193,25 @@ def _plan_original_paragraph_for_revised_span(
     if current_lo < len(orig_text):
         return None
     return ops
+
+
+def _revised_span_starts_with_heading_promotion(
+    orig_para: BodyParagraph,
+    revised_paras: list[BodyParagraph],
+    config: CompareConfig,
+) -> bool:
+    """Whether the revised span starts with a heading promoted out of an inline ``Heading:`` lead-in."""
+
+    if not revised_paras:
+        return False
+    orig_text = _concat_paragraph_text(orig_para, config)
+    heading_match = re.match(r"^\s*([A-Za-z][^:\n]{0,120}?):\s+", orig_text)
+    if heading_match is None:
+        return False
+    first_rev_text = _concat_paragraph_text(revised_paras[0], config).strip()
+    if not first_rev_text:
+        return False
+    return first_rev_text == heading_match.group(1).strip()
 
 
 def _empty_table_cell() -> dict:
