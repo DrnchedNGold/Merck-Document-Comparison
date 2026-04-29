@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,3 +81,56 @@ def pick_save_path_via_dialog(
         defaultextension=defaultextension,
     )
     return normalize_dialog_path(raw)
+
+
+def make_temp_output_docx_path(*, prefix: str = "merck-compare-", suffix: str = ".docx") -> Path:
+    """Create a real temporary `.docx` file path for a compare output.
+
+    The file is created on disk (empty) so downstream openers can rely on it existing.
+    The caller owns lifecycle/cleanup; in "Compare & Open" flows we intentionally
+    leave the file so Word/default apps can open it.
+    """
+    fd, raw = tempfile.mkstemp(prefix=prefix, suffix=suffix)
+    os.close(fd)
+    return Path(raw)
+
+
+def default_output_cache_dir() -> Path:
+    """Directory for cached compare outputs (safe to delete).
+
+    Files here may survive app restarts; the desktop shell only *reuses* a path
+    after it successfully wrote that path in the current process (see session
+    materialization in ``main_window``).
+    """
+    d = Path(tempfile.gettempdir()) / "merck-document-comparison-cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def compare_signature(
+    *,
+    original_path: str,
+    revised_path: str,
+    compare_config: dict[str, object],
+) -> str:
+    """Stable signature for whether output must be regenerated.
+
+    Uses file path + (mtime_ns, size) for each input plus the compare config.
+    """
+    o = Path(original_path)
+    r = Path(revised_path)
+    o_stat = o.stat()
+    r_stat = r.stat()
+    payload = {
+        "original": {"path": str(o), "mtime_ns": int(o_stat.st_mtime_ns), "size": int(o_stat.st_size)},
+        "revised": {"path": str(r), "mtime_ns": int(r_stat.st_mtime_ns), "size": int(r_stat.st_size)},
+        "config": compare_config,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def cached_output_path(*, signature: str, generation: int) -> Path:
+    """Cache path for a given signature + regeneration index."""
+    # Include generation index so "Recompare" can produce a fresh doc even when signature is unchanged.
+    return default_output_cache_dir() / f"{signature}-{generation}.docx"
