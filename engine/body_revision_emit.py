@@ -1344,8 +1344,8 @@ def _tc_equal_opcode_has_hard_boundary_for_merge(
     True when a trivial equal span still marks a sentence/reference boundary.
 
     We do not want ``replace`` chain collapsing to merge across stable boundaries
-    such as ``. `` or ``]. `` because that turns local edits into large
-    cross-sentence replace spans.
+    such as ``. `` or ``]. ``, or across explicit tab stops, because that turns
+    local edits into large cross-sentence or cross-field replace spans.
     """
 
     text = "".join(tok.surface for tok in orig_tokens[ei1:ei2]) + "".join(
@@ -1353,7 +1353,7 @@ def _tc_equal_opcode_has_hard_boundary_for_merge(
     )
     if not text:
         return False
-    return any(ch in text for ch in ".!?;]")
+    return any(ch in text for ch in ".!?;]\t")
 
 
 def _collapse_adjacent_replace_opcodes(
@@ -2510,6 +2510,15 @@ def _should_force_inline_diff_for_low_similarity(
         return False
     if max(anchor_lengths) < 1:
         return False
+    if (
+        len(change_ops) == 2
+        and len(opcodes) == 3
+        and opcodes[1][0] == "equal"
+    ):
+        changed_orig = sum(op[2] - op[1] for op in change_ops)
+        changed_rev = sum(op[4] - op[3] for op in change_ops)
+        if changed_orig <= 4 and changed_rev <= 4:
+            return True
     return opcodes[0][0] == "equal" or opcodes[-1][0] == "equal"
 
 
@@ -2987,18 +2996,11 @@ def _build_structured_toc_field_diff(
     date_iso: str,
 ) -> list[ET.Element] | None:
     """
-    Tab-aware diff for TOC lines with stable field structure.
+    Tab-aware diff for TOC lines with stable ``section<TAB>title<TAB>page`` fields.
 
-    When both sides look like ``section<TAB>title<TAB>page``, keep the shared
-    section field and shared title prefix plain, then revise only the changed
-    title tail / page tail. This avoids matching a TOC tab to spaces inside the
-    revised title text.
-
-    Titles that diverge from the first character (no long shared prefix) return
-    ``None`` so :func:`_track_change_elements_for_concat_texts` runs on the **full**
-    line. Diffing the title column alone would drop the ``section<TAB>`` token
-    anchor and can mis-align repeated words (e.g. multiple ``and``), duplicating a
-    long shared phrase in both ``w:del`` and ``w:ins``.
+    Keep the section field plain when unchanged, then diff the title and page
+    fields independently. This preserves TOC tab boundaries and prevents a title
+    rewrite from absorbing the page number into the same ``w:del`` / ``w:ins`` span.
     """
 
     ofields = orig_text.split("\t")
@@ -3007,32 +3009,43 @@ def _build_structured_toc_field_diff(
         return None
     if ofields[0] != rfields[0]:
         return None
-    shared_title_prefix = []
-    for a, b in zip(ofields[1], rfields[1], strict=False):
-        if a != b:
-            break
-        shared_title_prefix.append(a)
-    shared = "".join(shared_title_prefix)
-    # Keep this path narrow: only use it when the TOC title shares a meaningful
-    # exact prefix that ends at a clean boundary.
-    if len(shared.strip()) < 8:
-        return None
-    if shared and shared[-1].isalnum():
+    if not (re.search(r"\d", ofields[1]) or re.search(r"\d", rfields[1])):
         return None
 
     out: list[ET.Element] = []
     if ofields[0]:
         out.extend(_w_runs_for_plain_text(ofields[0]))
     out.extend(_w_runs_for_plain_text("\t"))
-    if shared:
-        out.extend(_w_runs_for_plain_text(shared))
 
-    orig_tail = ofields[1][len(shared) :] + "\t" + ofields[2]
-    rev_tail = rfields[1][len(shared) :] + "\t" + rfields[2]
-    if orig_tail:
-        out.append(_w_del_segment(orig_tail, _next_id(id_counter), author, date_iso))
-    if rev_tail:
-        out.append(_w_ins_segment(rev_tail, _next_id(id_counter), author, date_iso))
+    if ofields[1] == rfields[1]:
+        if ofields[1]:
+            out.extend(_w_runs_for_plain_text(ofields[1]))
+    else:
+        out.extend(
+            _track_change_elements_for_concat_texts(
+                ofields[1],
+                rfields[1],
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+        )
+
+    out.extend(_w_runs_for_plain_text("\t"))
+
+    if ofields[2] == rfields[2]:
+        if ofields[2]:
+            out.extend(_w_runs_for_plain_text(ofields[2]))
+    else:
+        out.extend(
+            _track_change_elements_for_concat_texts(
+                ofields[2],
+                rfields[2],
+                id_counter=id_counter,
+                author=author,
+                date_iso=date_iso,
+            )
+        )
     return out
 
 
