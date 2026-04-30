@@ -376,8 +376,8 @@
     "email3-ib-6-8": {
       "by_part": {
         "word/document.xml": {
-          "del": 6643,
-          "ins": 18289
+          "del": 6668,
+          "ins": 18312
         },
         "word/footer1.xml": {
           "del": 2,
@@ -602,8 +602,8 @@
       },
       "summary": {
         "document": {
-          "del": 6643,
-          "ins": 18289
+          "del": 6668,
+          "ins": 18312
         },
         "footers": {
           "del": 4,
@@ -618,8 +618,8 @@
     "email3-protocol-1026": {
       "by_part": {
         "word/document.xml": {
-          "del": 1056,
-          "ins": 1889
+          "del": 1058,
+          "ins": 1891
         },
         "word/footer1.xml": {
           "del": 0,
@@ -648,8 +648,8 @@
       },
       "summary": {
         "document": {
-          "del": 1056,
-          "ins": 1889
+          "del": 1058,
+          "ins": 1891
         },
         "footers": {
           "del": 2,
