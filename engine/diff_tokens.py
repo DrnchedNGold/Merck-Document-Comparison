@@ -26,9 +26,12 @@ from dataclasses import dataclass
 
 # Sponsor-style identifiers like ``MK-2870`` should stay intact, but generic
 # word+number labels such as ``TroFuse-020`` should still split so stable
-# numeric suffixes can align independently. Dates such as ``09-APR-2025`` also
-# continue to fall back to smaller pieces.
-_MIXED_ALNUM_HYPHEN_TOKEN = r"(?:[A-Z]{1,10}-\d+|\d+-[A-Z]{1,10})(?!-\d)"
+# numeric suffixes can align independently. ``\d+-[A-Z]+`` is kept narrow so
+# date-like text such as ``09-APR-2025`` does not backtrack into partial tokens
+# like ``09-AP`` / ``R-2025``.
+_MIXED_ALNUM_HYPHEN_TOKEN = (
+    r"(?:(?<!\d-)[A-Z]{1,10}-\d+|\d+-[A-Z]{1,10}(?![A-Z]|-\d))"
+)
 
 # Mixed identifiers, word chars, punctuation (non-word, non-space), or whitespace runs.
 _DIFF_TOKEN_PATTERN = re.compile(

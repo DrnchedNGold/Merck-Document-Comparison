@@ -39,6 +39,11 @@ def test_tokenize_splits_alpha_numeric_suffix_label_for_stable_number_alignment(
     assert [t.surface for t in toks] == ["TroFuse", "-", "020"]
 
 
+def test_tokenize_date_like_hyphen_chain_without_partial_mixed_token() -> None:
+    toks = tokenize_for_lcs("09-APR-2025")
+    assert [t.surface for t in toks] == ["09", "-", "APR", "-", "2025"]
+
+
 def test_norm_key_casefolds_words_not_whitespace_count() -> None:
     toks = tokenize_for_lcs("The CAT")
     keys = norm_keys(toks)

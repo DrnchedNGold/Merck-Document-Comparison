@@ -16,8 +16,8 @@
           "ins": 1
         },
         "word/header2.xml": {
-          "del": 1,
-          "ins": 3
+          "del": 2,
+          "ins": 2
         },
         "word/header3.xml": {
           "del": 2,
@@ -34,8 +34,8 @@
           "ins": 0
         },
         "headers": {
-          "del": 4,
-          "ins": 8
+          "del": 5,
+          "ins": 7
         }
       }
     },
