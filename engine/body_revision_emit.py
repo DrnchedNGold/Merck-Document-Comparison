@@ -78,14 +78,18 @@ from .diff_tokens import (
     structured_token_index_bounds_for_global_span,
     tokenize_for_lcs,
 )
-from .document_package import parse_docx_document_package
-from .docx_body_ingest import WORD_NAMESPACE, _parse_text_from_run_element
+from .docx_body_ingest import (
+    WORD_NAMESPACE,
+    _parse_text_from_run_element,
+    parse_structural_blocks_from_element,
+)
 from .paragraph_alignment import alignment_for_track_changes_emit
 from .docx_output_package import write_docx_copy_with_part_replacements
 from .docx_package_parts import (
     DOCUMENT_PART_PATH,
     discover_header_footer_part_paths,
     discover_header_footer_part_paths_from_namelist,
+    parse_header_footer_zip_part,
 )
 from .ooxml_namespace import serialize_ooxml_part
 from .table_diff import (
@@ -4915,10 +4919,6 @@ def emit_docx_with_package_track_changes(
 
     t_all = time.perf_counter()
     t0 = t_all
-    orig_pkg = parse_docx_document_package(orig_path)
-    t0 = _p("parse original package IR", t0)
-    rev_pkg = parse_docx_document_package(rev_path)
-    t0 = _p("parse revised package IR", t0)
 
     if date_iso is None:
         date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -4926,28 +4926,60 @@ def emit_docx_with_package_track_changes(
     id_counter = [0]
     revised_numbering_xml: bytes | None = None
     has_original_numbering = False
-    with zipfile.ZipFile(rev_path, "r") as zrev:
+    # Performance: zip open/read can dominate on Windows. Keep each `.docx` zip open
+    # once and reuse it for ingest, structural element loads, and raw payload reads.
+    with (
+        zipfile.ZipFile(orig_path, "r") as zin,
+        zipfile.ZipFile(rev_path, "r") as zrev,
+    ):
+        # ---- Ingest packages into IR (no extra zip opens) ----
+        # document.xml → BodyIR
+        orig_root = ET.fromstring(zin.read(DOCUMENT_PART_PATH))
+        orig_body = orig_root.find("w:body", NS)
+        orig_doc_ir = (
+            parse_structural_blocks_from_element(orig_body)
+            if orig_body is not None
+            else {"version": 1, "blocks": []}
+        )
+        rev_root = ET.fromstring(zrev.read(DOCUMENT_PART_PATH))
+        rev_body = rev_root.find("w:body", NS)
+        rev_doc_ir = (
+            parse_structural_blocks_from_element(rev_body)
+            if rev_body is not None
+            else {"version": 1, "blocks": []}
+        )
+
+        orig_header_footer: dict[str, BodyIR] = {}
+        for part in discover_header_footer_part_paths_from_namelist(zin.namelist()):
+            orig_header_footer[part] = parse_header_footer_zip_part(zin, part)
+        rev_header_footer: dict[str, BodyIR] = {}
+        for part in discover_header_footer_part_paths_from_namelist(zrev.namelist()):
+            rev_header_footer[part] = parse_header_footer_zip_part(zrev, part)
+
+        t0 = _p("parse original+revised package IR (single zip open each)", t0)
+
+        # ---- Load revised structural block elements + numbering ----
         rev_doc_blocks = load_structural_block_elements_from_docx_part(zrev, DOCUMENT_PART_PATH)
         rev_hf_blocks: dict[str, list[ET.Element]] = {}
         for _part in discover_header_footer_part_paths_from_namelist(zrev.namelist()):
             rev_hf_blocks[_part] = load_structural_block_elements_from_docx_part(zrev, _part)
         if "word/numbering.xml" in zrev.namelist():
             revised_numbering_xml = zrev.read("word/numbering.xml")
-    t0 = _p("load revised structural blocks + numbering.xml", t0)
+        t0 = _p("load revised structural blocks + numbering.xml", t0)
 
-    header_footer_raw: list[tuple[str, bytes]] = []
-    with zipfile.ZipFile(orig_path, "r") as zin:
+        # ---- Read original raw bytes needed for mutation/serialization ----
+        header_footer_raw: list[tuple[str, bytes]] = []
         raw_document_xml = zin.read(DOCUMENT_PART_PATH)
         has_original_numbering = "word/numbering.xml" in zin.namelist()
         for part in discover_header_footer_part_paths_from_namelist(zin.namelist()):
             header_footer_raw.append((part, zin.read(part)))
-    t0 = _p("read original document.xml + header/footer raw bytes (one zip open)", t0)
+        t0 = _p("read original document.xml + header/footer raw bytes", t0)
 
     root = ET.fromstring(raw_document_xml)
     apply_body_track_changes_to_document_root(
         root,
-        orig_pkg["document"],
-        rev_pkg["document"],
+        orig_doc_ir,
+        rev_doc_ir,
         config,
         author=author,
         date_iso=date_iso,
@@ -4964,8 +4996,8 @@ def emit_docx_with_package_track_changes(
     empty_ir: BodyIR = {"version": 1, "blocks": []}
     for part, raw_hf in header_footer_raw:
         hf_root = ET.fromstring(raw_hf)
-        o_ir = orig_pkg["header_footer"].get(part, empty_ir)
-        r_ir = rev_pkg["header_footer"].get(part, empty_ir)
+        o_ir = orig_header_footer.get(part, empty_ir)
+        r_ir = rev_header_footer.get(part, empty_ir)
         rev_hf_el = rev_hf_blocks.get(part)
         apply_track_changes_to_hdr_ftr_root(
             hf_root,
