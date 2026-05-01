@@ -26,12 +26,18 @@ def write_docx_copy_with_part_replacements(
     dst = Path(dest_docx)
     keys = {_norm_zip_name(k): v for k, v in replacements.items()}
 
-    with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(dst, "w") as zout:
+    # Performance: writing output can be a major cost on Windows (large corpora).
+    # Track Changes correctness is in the XML payloads, not the zip compression.
+    # Use ZIP_STORED to avoid per-entry recompression CPU while preserving package layout.
+    with (
+        zipfile.ZipFile(src, "r") as zin,
+        zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_STORED) as zout,
+    ):
         for info in zin.infolist():
             name = _norm_zip_name(info.filename)
             payload = keys.get(name, zin.read(info.filename))
             # Fresh ZipInfo so CRC/size match replaced payloads (avoids Word repair).
             zi = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
-            zi.compress_type = info.compress_type
+            zi.compress_type = zipfile.ZIP_STORED
             zi.external_attr = info.external_attr
             zout.writestr(zi, payload)

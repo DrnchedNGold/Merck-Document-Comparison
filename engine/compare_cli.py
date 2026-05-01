@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -112,6 +113,7 @@ def run_compare(
     *,
     author: str,
     date_iso: str | None,
+    profile: bool = False,
 ) -> None:
     validate_docx_for_preflight(original)
     validate_docx_for_preflight(revised)
@@ -123,6 +125,7 @@ def run_compare(
         config,
         author=author,
         date_iso=date_iso,
+        profile=profile,
     )
 
 
@@ -160,6 +163,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="After success, print w:del stats (SCRUM-130: confirm consolidated abbreviations block in output).",
     )
+    p.add_argument(
+        "--profile",
+        action="store_true",
+        help="Print phase timings for document generation to stderr (diagnostics only).",
+    )
     return p
 
 
@@ -171,14 +179,43 @@ def main(argv: list[str] | None = None) -> int:
         return code
     assert cfg is not None
     try:
-        run_compare(
-            args.original,
-            args.revised,
-            args.output,
-            cfg,
-            author=str(args.author),
-            date_iso=args.date_iso,
-        )
+        # Optional deep profiler for performance work. This does not change compare
+        # behavior; it only prints function timings to stderr when explicitly enabled.
+        #
+        # Usage:
+        #   MERCK_COMPARE_CPROFILE=1 python -m engine.compare_cli --profile ...
+        if bool(args.profile) and os.environ.get("MERCK_COMPARE_CPROFILE") == "1":
+            import cProfile
+            import io
+            import pstats
+
+            prof = cProfile.Profile()
+            prof.enable()
+            run_compare(
+                args.original,
+                args.revised,
+                args.output,
+                cfg,
+                author=str(args.author),
+                date_iso=args.date_iso,
+                profile=True,
+            )
+            prof.disable()
+            s = io.StringIO()
+            stats = pstats.Stats(prof, stream=s).sort_stats("cumtime")
+            stats.print_stats(40)
+            print("[merck-compare cprofile] top cumulative time:", file=sys.stderr)
+            print(s.getvalue(), file=sys.stderr)
+        else:
+            run_compare(
+                args.original,
+                args.revised,
+                args.output,
+                cfg,
+                author=str(args.author),
+                date_iso=args.date_iso,
+                profile=bool(args.profile),
+            )
     except (PreflightValidationError, DocumentXmlMissingError, ET.ParseError) as e:
         exit_code, msg = classify_engine_failure(e)
         print(msg, file=sys.stderr)
