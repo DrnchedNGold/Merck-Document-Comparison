@@ -861,6 +861,7 @@ def _repair_alignment_unmatched_rev_expansion_override(
     r_txts = [_block_alignment_text(revised, j, config) for j in range(n)]
     orig_sigs = [_block_signature(original, i, config) for i in range(m)]
     rev_sigs = [_block_signature(revised, j, config) for j in range(n)]
+    rank_cache: dict[tuple[int, int], float] = {}
 
     def _orig_only_step_index(oi_del: int) -> int | None:
         for j, a2 in enumerate(alignment):
@@ -874,7 +875,11 @@ def _repair_alignment_unmatched_rev_expansion_override(
         candidates = [i for i in range(m) if abs(i - rj) <= slack]
         ranked: list[tuple[int, float]] = []
         for c in candidates:
-            s = _pair_rank_similarity_best_candidate(c, rj, o_txts, r_txts, ob, rb)
+            key = (c, rj)
+            s = rank_cache.get(key)
+            if s is None:
+                s = _pair_rank_similarity_best_candidate(c, rj, o_txts, r_txts, ob, rb)
+                rank_cache[key] = s
             ranked.append((c, s))
         if not ranked:
             return None
@@ -1194,6 +1199,8 @@ def _blocks_align_in_lcs(
     n: int,
     o_txts: list[str],
     r_txts: list[str],
+    o_tok_keys: list[list[str]] | None = None,
+    r_tok_keys: list[list[str]] | None = None,
     cache: dict[tuple[int, int], bool],
     skip_length_ratio: bool = False,
 ) -> bool:
@@ -1274,8 +1281,14 @@ def _blocks_align_in_lcs(
     skip_char_ratio = _should_skip_expensive_char_ratio(
         lo, lr, body_block_count=max(m, n)
     )
-    ot = norm_keys(tokenize_for_lcs(o_txt))
-    rt = norm_keys(tokenize_for_lcs(r_txt))
+    # Performance: tokenization is deterministic and expensive. When available,
+    # reuse per-block token keys instead of re-tokenizing for every compared pair.
+    if o_tok_keys is not None and r_tok_keys is not None:
+        ot = o_tok_keys[oi]
+        rt = r_tok_keys[rj]
+    else:
+        ot = norm_keys(tokenize_for_lcs(o_txt))
+        rt = norm_keys(tokenize_for_lcs(r_txt))
     tok_sm = difflib.SequenceMatcher(None, ot, rt, autojunk=False)
     tok_q = tok_sm.quick_ratio()
 
@@ -2138,6 +2151,10 @@ def _align_paragraphs_compute(
     m, n = len(orig_sigs), len(rev_sigs)
     o_txts = [_block_alignment_text(original, i, config) for i in range(m)]
     r_txts = [_block_alignment_text(revised, j, config) for j in range(n)]
+    # Performance: LCS alignment calls fuzzy match on many (oi, rj) pairs. Precompute
+    # token norm keys once per block so we don't re-tokenize inside difflib.
+    o_tok_keys = [norm_keys(tokenize_for_lcs(t)) for t in o_txts]
+    r_tok_keys = [norm_keys(tokenize_for_lcs(t)) for t in r_txts]
     align_cache: dict[tuple[int, int], bool] = {}
 
     def aligned(oi: int, rj: int) -> bool:
@@ -2169,6 +2186,8 @@ def _align_paragraphs_compute(
                 n=n,
                 o_txts=o_txts,
                 r_txts=r_txts,
+                o_tok_keys=o_tok_keys,
+                r_tok_keys=r_tok_keys,
                 cache=align_cache,
                 skip_length_ratio=True,
             ):
@@ -2188,6 +2207,8 @@ def _align_paragraphs_compute(
             n=n,
             o_txts=o_txts,
             r_txts=r_txts,
+            o_tok_keys=o_tok_keys,
+            r_tok_keys=r_tok_keys,
             cache=align_cache,
             skip_length_ratio=False,
         )
