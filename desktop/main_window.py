@@ -344,6 +344,7 @@ class MerckDesktopApp(tk.Tk):
         selected_name = Path(selected).name
         self._profile_label.set(f"Loaded profile: {selected_name}")
         self._word_track_changes_profile_name.set(f"Word options: {selected_name}")
+        self._on_apply_word_options()
 
     def _on_save_profile(self) -> None:
         dest = pick_save_path_via_dialog(
@@ -688,7 +689,7 @@ class MerckDesktopApp(tk.Tk):
 
         def reset_to_defaults() -> None:
             defaults = default_word_track_changes_options()
-            self._word_track_changes_options = dict(defaults)
+            # Only update dialog widgets; committed state updates on "Save & Apply".
             # Re-sync all UI vars to defaults.
             ins_mark.set(next(n for n, v in _INSERTED_MARK_CHOICES if v == defaults["InsertedTextMark"]))
             ins_color.set(next(n for n, v in _WORD_COLOR_CHOICES if v == defaults["InsertedTextColor"]))
