@@ -335,14 +335,15 @@ class MerckDesktopApp(tk.Tk):
         if not selected:
             return
         try:
-            cfg, word_opts, prof_name = load_profile_bundle(Path(selected))
+            cfg, word_opts, _prof_name = load_profile_bundle(Path(selected))
         except ProfileFormatError as exc:
             messagebox.showerror(self.title(), str(exc))
             return
         self._apply_compare_config(cfg)
         self._word_track_changes_options = dict(word_opts)
-        self._profile_label.set(f"Loaded profile: {prof_name}")
-        self._word_track_changes_profile_name.set(f"Word options: {prof_name}")
+        selected_name = Path(selected).name
+        self._profile_label.set(f"Loaded profile: {selected_name}")
+        self._word_track_changes_profile_name.set(f"Word options: {selected_name}")
 
     def _on_save_profile(self) -> None:
         dest = pick_save_path_via_dialog(
