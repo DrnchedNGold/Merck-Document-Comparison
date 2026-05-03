@@ -27,9 +27,11 @@ from desktop.profiles import (
     load_profile_bundle,
     load_profile_json,
     save_profile_json,
+    validate_word_track_changes_options,
 )
 from desktop.user_prefs import load_prefs, save_prefs
 from desktop.word_options import (
+    apply_portable_track_changes_options_to_docx,
     apply_word_track_changes_options,
     open_in_word_with_temp_track_changes_options,
 )
@@ -163,9 +165,11 @@ class MerckDesktopApp(tk.Tk):
         self._ignore_whitespace = tk.BooleanVar(value=default_cfg["ignore_whitespace"])
         self._ignore_formatting = tk.BooleanVar(value=default_cfg["ignore_formatting"])
         self._detect_moves = tk.BooleanVar(value=default_cfg["detect_moves"])
-        self._word_track_changes_options: dict[str, int] = default_word_track_changes_options()
-        self._word_track_changes_profile_name = tk.StringVar(value="Merck Word defaults")
         self._prefs = load_prefs()
+        self._word_track_changes_options: dict[str, int] = validate_word_track_changes_options(
+            self._prefs.get("word_track_changes_options")
+        )
+        self._word_track_changes_profile_name = tk.StringVar(value="Merck Word defaults")
         self._profile_label = tk.StringVar(value=DEFAULT_WORD_COMPAT_PROFILE_NAME)
         self._validation_message = tk.StringVar(
             value="Select both Original and Revised .docx files.",
@@ -189,7 +193,7 @@ class MerckDesktopApp(tk.Tk):
         return self._validation_message.get()
 
     def compare_button_is_enabled(self) -> bool:
-        return str(self._compare_btn.cget("state")) == str(tk.NORMAL)
+        return str(self._compare_word_btn.cget("state")) == str(tk.NORMAL)
 
     def set_file_dialog(self, fn: FileDialogFn | None) -> None:
         """Replace the file picker (used by tests to inject a fake dialog). Pass None to restore default."""
@@ -224,24 +228,15 @@ class MerckDesktopApp(tk.Tk):
             textvariable=self._validation_message,
             wraplength=480,
         )
-        self._status_label.pack(anchor=tk.W)
+        self._status_label.pack(side=tk.LEFT, anchor=tk.W)
 
-        self._compare_btn = ttk.Button(
-            main,
-            text="Compare",
-            command=self._on_compare,
-            state=tk.DISABLED,
-        )
-        compare_row = ttk.Frame(main)
-        compare_row.pack(fill=tk.X, **pad)
-        self._compare_btn.pack(in_=compare_row, side=tk.RIGHT)
         self._compare_word_btn = ttk.Button(
-            compare_row,
+            status_frame,
             text="Compare (open in Word)",
             command=self._on_compare_open_in_word,
             state=tk.DISABLED,
         )
-        self._compare_word_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        self._compare_word_btn.pack(side=tk.RIGHT)
 
     def _add_file_row(
         self,
@@ -285,10 +280,6 @@ class MerckDesktopApp(tk.Tk):
             side=tk.LEFT,
             padx=(8, 0),
         )
-        ttk.Button(actions, text="Apply Word Track Changes options", command=self._on_apply_word_options).pack(
-            side=tk.LEFT,
-            padx=(8, 0),
-        )
 
         ttk.Label(section, textvariable=self._word_track_changes_profile_name, font=("", 9, "bold")).pack(
             anchor=tk.W, pady=(8, 0)
@@ -315,7 +306,6 @@ class MerckDesktopApp(tk.Tk):
     def _sync_validation(self) -> None:
         state = compute_validation_state(self._original_path.get(), self._revised_path.get())
         self._validation_message.set(state.message)
-        self._compare_btn.configure(state=tk.NORMAL if state.compare_enabled else tk.DISABLED)
         self._compare_word_btn.configure(state=tk.NORMAL if state.compare_enabled else tk.DISABLED)
         self._status_label.configure(foreground="#a50a0a" if state.status_is_error else "")
 
@@ -385,10 +375,7 @@ class MerckDesktopApp(tk.Tk):
         self._word_track_changes_profile_name.set(f"Word options: {Path(dest).name}")
 
     def _on_apply_word_options(self) -> None:
-        if sys.platform != "win32":
-            messagebox.showwarning(self.title(), "Word automation is only supported on Windows.")
-            return
-        if not bool(self._prefs.get("skip_word_global_confirm", False)):
+        if sys.platform == "win32" and not bool(self._prefs.get("skip_word_global_confirm", False)):
             dlg = tk.Toplevel(self)
             dlg.title("Apply Word settings?")
             dlg.resizable(False, False)
@@ -424,6 +411,9 @@ class MerckDesktopApp(tk.Tk):
             if not proceed["ok"]:
                 return
 
+        self._prefs["word_track_changes_options"] = dict(self._word_track_changes_options)
+        save_prefs(self._prefs)
+
         ok, err = apply_word_track_changes_options(
             track_changes_options=dict(self._word_track_changes_options),
         )
@@ -433,7 +423,27 @@ class MerckDesktopApp(tk.Tk):
                 f"Could not apply Word Track Changes options.\n\n{err or ''}".strip(),
             )
             return
-        messagebox.showinfo(self.title(), "Applied Track Changes options to Word for this PC/user.")
+        if sys.platform == "win32":
+            messagebox.showinfo(
+                self.title(),
+                "Applied Track Changes options to Word for this PC/user.\n"
+                "These options are also saved for future generated documents.",
+            )
+            return
+        if sys.platform == "darwin":
+            messagebox.showinfo(
+                self.title(),
+                "Change Applied!!"
+            )
+            return
+        messagebox.showinfo(
+            self.title(),
+            (
+                "Saved Track Changes defaults for future generated documents.\n"
+                "Portable document settings will apply on Windows, macOS, and Linux.\n"
+                "Word-only display colors and marks still require Word automation on Windows."
+            ),
+        )
 
     def _on_edit_word_options(self) -> None:
         dialog = tk.Toplevel(self)
@@ -635,22 +645,24 @@ class MerckDesktopApp(tk.Tk):
 
         fmt_mark = mk_choice_var("RevisedPropertiesMark", _FORMATTING_MARK_CHOICES)
         fmt_color = mk_choice_var("RevisedPropertiesColor", _WORD_COLOR_CHOICES)
-        ttk.Label(frame, text="Formatting:").grid(row=15, column=1, sticky=tk.W)
+        fmt_row = ttk.Frame(frame)
+        fmt_row.grid(row=15, column=1, columnspan=4, sticky=tk.W)
+        ttk.Label(fmt_row, text="Formatting:").pack(side=tk.LEFT)
         ttk.Combobox(
-            frame,
+            fmt_row,
             textvariable=fmt_mark,
             values=[n for n, _ in _FORMATTING_MARK_CHOICES],
-            width=18,
+            width=12,
             state="readonly",
-        ).grid(row=15, column=2, padx=(6, 6))
-        ttk.Label(frame, text="Color:").grid(row=15, column=3, sticky=tk.W)
+        ).pack(side=tk.LEFT, padx=(7, 20))
+        ttk.Label(fmt_row, text="Color:").pack(side=tk.LEFT, padx=(5.3, 0))
         ttk.Combobox(
-            frame,
+            fmt_row,
             textvariable=fmt_color,
             values=[n for n, _ in _WORD_COLOR_CHOICES],
             width=14,
             state="readonly",
-        ).grid(row=15, column=4, padx=(6, 0))
+        ).pack(side=tk.LEFT, padx=(6, 0))
 
         width_in = tk.StringVar(
             value=str(self._word_track_changes_options.get("BalloonsPreferredWidthInches", 3.7))
@@ -658,13 +670,17 @@ class MerckDesktopApp(tk.Tk):
         show_lines = tk.BooleanVar(
             value=bool(int(self._word_track_changes_options.get("BalloonsShowConnectingLines", 0)))
         )
-        ttk.Label(frame, text="Balloons width (in):").grid(row=16, column=0, sticky=tk.W, pady=(4, 0))
-        ttk.Entry(frame, textvariable=width_in, width=10).grid(
-            row=16, column=1, sticky=tk.W, padx=(6, 0), pady=(4, 0)
-        )
-        ttk.Checkbutton(frame, text="Show connecting lines", variable=show_lines).grid(
-            row=16, column=2, columnspan=2, sticky=tk.W, pady=(4, 0)
-        )
+        balloons_row = ttk.Frame(frame)
+        balloons_row.grid(row=16, column=0, columnspan=5, sticky="ew", pady=(4, 0))
+        balloons_left = ttk.Frame(balloons_row)
+        balloons_left.pack(side=tk.LEFT)
+        ttk.Label(balloons_left, text="Balloons width (in):").pack(side=tk.LEFT)
+        ttk.Entry(balloons_left, textvariable=width_in, width=10).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Checkbutton(
+            balloons_row,
+            text="Show connecting lines",
+            variable=show_lines,
+        ).pack(side=tk.RIGHT)
 
         btns = ttk.Frame(dialog, padding=(12, 8, 12, 12))
         btns.pack(fill=tk.X)
@@ -693,7 +709,7 @@ class MerckDesktopApp(tk.Tk):
             width_in.set(str(defaults.get("BalloonsPreferredWidthInches", 3.7)))
             show_lines.set(bool(int(defaults.get("BalloonsShowConnectingLines", 0))))
 
-        def save_and_close() -> None:
+        def save_and_apply() -> None:
             try:
                 width = float(width_in.get().strip())
             except ValueError:
@@ -722,11 +738,12 @@ class MerckDesktopApp(tk.Tk):
                     "BalloonsShowConnectingLines": 1 if show_lines.get() else 0,
                 }
             )
+            self._on_apply_word_options()
             dialog.destroy()
 
         ttk.Button(btns, text="Reset to defaults", command=reset_to_defaults).pack(side=tk.LEFT)
         ttk.Button(btns, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT)
-        ttk.Button(btns, text="Save", command=save_and_close).pack(side=tk.RIGHT, padx=(8, 0))
+        ttk.Button(btns, text="Save & Apply", command=save_and_apply).pack(side=tk.RIGHT, padx=(8, 0))
 
         dialog.wait_window(dialog)
 
@@ -786,6 +803,15 @@ class MerckDesktopApp(tk.Tk):
             return
 
         output_path = Path(out_path)
+        ok, err = apply_portable_track_changes_options_to_docx(
+            output_path,
+            track_changes_options=dict(self._word_track_changes_options),
+        )
+        if not ok:
+            messagebox.showwarning(
+                self.title(),
+                f"Could not embed Track Changes document settings.\n\n{err or ''}".strip(),
+            )
         if open_in_word and sys.platform == "win32":
             ok, err = open_in_word_with_temp_track_changes_options(
                 output_path,
@@ -808,9 +834,6 @@ class MerckDesktopApp(tk.Tk):
         warn = open_path_with_default_app(output_path)
         if warn:
             messagebox.showwarning(self.title(), warn)
-
-    def _on_compare(self) -> None:
-        self._run_compare(open_in_word=False)
 
     def _on_compare_open_in_word(self) -> None:
         self._run_compare(open_in_word=True)
