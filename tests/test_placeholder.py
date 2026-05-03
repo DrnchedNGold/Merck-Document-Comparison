@@ -1,8 +1,3 @@
-def test_placeholder_passes() -> None:
-    """Placeholder test to keep the baseline CI green."""
-    assert True
-
-
 def test_monorepo_scaffold_exists() -> None:
     """Baseline scaffold directories required by SCRUM-20."""
     from pathlib import Path

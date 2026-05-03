@@ -56,6 +56,7 @@ import difflib
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import zipfile
@@ -77,14 +78,18 @@ from .diff_tokens import (
     structured_token_index_bounds_for_global_span,
     tokenize_for_lcs,
 )
-from .document_package import parse_docx_document_package
-from .docx_body_ingest import WORD_NAMESPACE, _parse_text_from_run_element
+from .docx_body_ingest import (
+    WORD_NAMESPACE,
+    _parse_text_from_run_element,
+    parse_structural_blocks_from_element,
+)
 from .paragraph_alignment import alignment_for_track_changes_emit
 from .docx_output_package import write_docx_copy_with_part_replacements
 from .docx_package_parts import (
     DOCUMENT_PART_PATH,
     discover_header_footer_part_paths,
     discover_header_footer_part_paths_from_namelist,
+    parse_header_footer_zip_part,
 )
 from .ooxml_namespace import serialize_ooxml_part
 from .table_diff import (
@@ -1191,8 +1196,17 @@ def _tc_concat_fragmentation_debug_enabled(orig_text: str, rev_text: str) -> boo
         "on",
     ):
         return True
-    return (
-        orig_text == "the name is kiran" and rev_text == "I am introduce as kiran"
+    return False
+
+
+def _tc_collapse_chain_debug_enabled() -> bool:
+    """True when opcode collapse merge diagnostics should print (stderr)."""
+
+    return os.environ.get("MDC_DEBUG_TC_COLLAPSE_CHAIN", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
     )
 
 
@@ -1397,7 +1411,7 @@ def _collapse_adjacent_replace_opcodes(
             end_j2 = rj2
             chain_steps += 1
             j += 2
-        if chain_steps > 0:
+        if chain_steps > 0 and _tc_collapse_chain_debug_enabled():
             print(
                 f"[MDC_DEBUG_TC_COLLAPSE_CHAIN] merged_chain_span "
                 f"i1={start_i1} i2={end_i2} j1={start_j1} j2={end_j2} chain_steps={chain_steps}",
@@ -2693,8 +2707,8 @@ def _track_change_elements_for_concat_texts(
     When token LCS looks like a large rewrite (low match ratio, many opcodes), returns a single
     ``w:del`` for *orig_text* and a single ``w:ins`` for *rev_text* instead of interleaved markup.
 
-    Verbose fragmentation trace (stderr): set ``MDC_DEBUG_TC_CONCAT_FRAGMENTS=1``, or use the
-    built-in example pair ``the name is kiran`` vs ``I am introduce as kiran`` (always traces).
+    Verbose fragmentation trace (stderr): set ``MDC_DEBUG_TC_CONCAT_FRAGMENTS=1``.
+    Opcode-chain collapse diagnostics: set ``MDC_DEBUG_TC_COLLAPSE_CHAIN=1``.
     """
 
     if _numeric_grouping_only_change(orig_text, rev_text):
@@ -2711,20 +2725,22 @@ def _track_change_elements_for_concat_texts(
     total_orig_tokens = len(orig_tokens)
     total_rev_tokens = len(rev_tokens)
     if total_orig_tokens == 0 and total_rev_tokens > 0:
-        print(
-            "[MDC_DEBUG_TC_CONCAT_FRAG] STRUCTURAL_EMPTY_CASE_TRIGGERED "
-            "orig_tokens=0 rev_tokens>0 insert_only",
-            file=sys.stderr,
-        )
+        if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+            print(
+                "[MDC_DEBUG_TC_CONCAT_FRAG] STRUCTURAL_EMPTY_CASE_TRIGGERED "
+                "orig_tokens=0 rev_tokens>0 insert_only",
+                file=sys.stderr,
+            )
         return [
             _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
         ]
     if total_rev_tokens == 0 and total_orig_tokens > 0:
-        print(
-            "[MDC_DEBUG_TC_CONCAT_FRAG] STRUCTURAL_EMPTY_CASE_TRIGGERED "
-            "rev_tokens=0 orig_tokens>0 delete_only",
-            file=sys.stderr,
-        )
+        if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+            print(
+                "[MDC_DEBUG_TC_CONCAT_FRAG] STRUCTURAL_EMPTY_CASE_TRIGGERED "
+                "rev_tokens=0 orig_tokens>0 delete_only",
+                file=sys.stderr,
+            )
         return [
             _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
         ]
@@ -2814,10 +2830,11 @@ def _track_change_elements_for_concat_texts(
         and not has_meaningful_equal
     )
     if collapse_rewrite:
-        print(
-            "[MDC_DEBUG_TC_CONCAT_FRAG] COLLAPSE_REWRITE_TRIGGERED",
-            file=sys.stderr,
-        )
+        if _tc_concat_fragmentation_debug_enabled(orig_text, rev_text):
+            print(
+                "[MDC_DEBUG_TC_CONCAT_FRAG] COLLAPSE_REWRITE_TRIGGERED",
+                file=sys.stderr,
+            )
         return [
             _w_del_segment(orig_text, _next_id(id_counter), author, date_iso),
             _w_ins_segment(rev_text, _next_id(id_counter), author, date_iso),
@@ -3120,7 +3137,8 @@ def _tbl_tr_elements(tbl: ET.Element) -> list[ET.Element]:
 
 
 def _replace_body_child_element(container: ET.Element, old: ET.Element, new: ET.Element) -> None:
-    idx = list(container).index(old)
+    # Avoid materializing a full child list for a simple index lookup.
+    idx = next(i for i, c in enumerate(container) if c is old)
     container.remove(old)
     container.insert(idx, new)
 
@@ -3636,6 +3654,30 @@ def _apply_track_changes_to_structural_container(
 ) -> None:
     """Mutate ``container`` in place using LCS paragraph alignment (inserts, deletes, in-place edits)."""
 
+    # Hot path: we frequently need the DOM index for an existing block element. Using
+    # ``list(container).index(el)`` repeatedly turns this into quadratic behavior on
+    # large docs. Maintain a small, local cache and rebuild it only when mutations
+    # invalidate indices.
+    _child_index_cache: dict[int, int] | None = None
+
+    def _child_index(el: ET.Element) -> int:
+        nonlocal _child_index_cache
+        if _child_index_cache is None:
+            _child_index_cache = {id(c): i for i, c in enumerate(container)}
+        idx = _child_index_cache.get(id(el))
+        if idx is not None:
+            return idx
+        _child_index_cache = {id(c): i for i, c in enumerate(container)}
+        return _child_index_cache[id(el)]
+
+    def _cache_shift_after_insert(insert_at: int) -> None:
+        nonlocal _child_index_cache
+        if _child_index_cache is None:
+            return
+        for k, v in list(_child_index_cache.items()):
+            if v >= insert_at:
+                _child_index_cache[k] = v + 1
+
     block_els = _structural_block_elements(container)
     ob = original_ir.get("blocks", [])
     rb = revised_ir.get("blocks", [])
@@ -3756,7 +3798,7 @@ def _apply_track_changes_to_structural_container(
                 )
                 if first_match_idx is None:
                     continue
-                insert_at = list(container).index(el)
+                insert_at = _child_index(el)
                 for lead_idx, (kind, _, extra_rev) in enumerate(split_ops[:first_match_idx]):
                     if kind != "insert":
                         continue
@@ -3794,6 +3836,7 @@ def _apply_track_changes_to_structural_container(
                             date_iso=date_iso,
                         )
                     container.insert(insert_at, lead_p)
+                    _cache_shift_after_insert(insert_at)
                     insert_at += 1
 
                 first_kind, first_orig, first_rev = split_ops[first_match_idx]
@@ -3818,7 +3861,7 @@ def _apply_track_changes_to_structural_container(
                     ):
                         _replace_p_pr_from_revised(el, first_rev_el)
                     _replace_p_content_preserving_p_pr(el, first_kids)
-                insert_at = list(container).index(el) + 1
+                insert_at = _child_index(el) + 1
                 for extra_idx, (kind, extra_orig, extra_rev) in enumerate(
                     split_ops[first_match_idx + 1 :],
                     start=first_match_idx + 1,
@@ -3870,6 +3913,7 @@ def _apply_track_changes_to_structural_container(
                             revised_p_el=revised_p_el,
                         )
                     container.insert(insert_at, extra_p)
+                    _cache_shift_after_insert(insert_at)
                     insert_at += 1
                 continue
             rev_para: BodyParagraph = rev_para_for_diff
@@ -4850,6 +4894,7 @@ def emit_docx_with_package_track_changes(
     *,
     author: str = "MerckDocCompare",
     date_iso: str | None = None,
+    profile: bool = False,
 ) -> None:
     """
     Apply Track Changes to ``word/document.xml`` and every header/footer part
@@ -4862,8 +4907,18 @@ def emit_docx_with_package_track_changes(
     rev_path = Path(revised_docx)
     out_path = Path(output_docx)
 
-    orig_pkg = parse_docx_document_package(orig_path)
-    rev_pkg = parse_docx_document_package(rev_path)
+    def _p(label: str, t0: float) -> float:
+        if profile:
+            t1 = time.perf_counter()
+            print(
+                f"[merck-compare profile] emit {label}: {t1 - t0:.3f}s",
+                file=sys.stderr,
+            )
+            return t1
+        return time.perf_counter()
+
+    t_all = time.perf_counter()
+    t0 = t_all
 
     if date_iso is None:
         date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -4871,52 +4926,91 @@ def emit_docx_with_package_track_changes(
     id_counter = [0]
     revised_numbering_xml: bytes | None = None
     has_original_numbering = False
-    with zipfile.ZipFile(rev_path, "r") as zrev:
+    # Performance: zip open/read can dominate on Windows. Keep each `.docx` zip open
+    # once and reuse it for ingest, structural element loads, and raw payload reads.
+    with (
+        zipfile.ZipFile(orig_path, "r") as zin,
+        zipfile.ZipFile(rev_path, "r") as zrev,
+    ):
+        # ---- Ingest packages into IR (no extra zip opens) ----
+        # document.xml → BodyIR
+        orig_root = ET.fromstring(zin.read(DOCUMENT_PART_PATH))
+        orig_body = orig_root.find("w:body", NS)
+        orig_doc_ir = (
+            parse_structural_blocks_from_element(orig_body)
+            if orig_body is not None
+            else {"version": 1, "blocks": []}
+        )
+        rev_root = ET.fromstring(zrev.read(DOCUMENT_PART_PATH))
+        rev_body = rev_root.find("w:body", NS)
+        rev_doc_ir = (
+            parse_structural_blocks_from_element(rev_body)
+            if rev_body is not None
+            else {"version": 1, "blocks": []}
+        )
+
+        orig_header_footer: dict[str, BodyIR] = {}
+        for part in discover_header_footer_part_paths_from_namelist(zin.namelist()):
+            orig_header_footer[part] = parse_header_footer_zip_part(zin, part)
+        rev_header_footer: dict[str, BodyIR] = {}
+        for part in discover_header_footer_part_paths_from_namelist(zrev.namelist()):
+            rev_header_footer[part] = parse_header_footer_zip_part(zrev, part)
+
+        t0 = _p("parse original+revised package IR (single zip open each)", t0)
+
+        # ---- Load revised structural block elements + numbering ----
         rev_doc_blocks = load_structural_block_elements_from_docx_part(zrev, DOCUMENT_PART_PATH)
         rev_hf_blocks: dict[str, list[ET.Element]] = {}
         for _part in discover_header_footer_part_paths_from_namelist(zrev.namelist()):
             rev_hf_blocks[_part] = load_structural_block_elements_from_docx_part(zrev, _part)
         if "word/numbering.xml" in zrev.namelist():
             revised_numbering_xml = zrev.read("word/numbering.xml")
+        t0 = _p("load revised structural blocks + numbering.xml", t0)
 
-    with zipfile.ZipFile(orig_path, "r") as zin:
+        # ---- Read original raw bytes needed for mutation/serialization ----
+        header_footer_raw: list[tuple[str, bytes]] = []
         raw_document_xml = zin.read(DOCUMENT_PART_PATH)
         has_original_numbering = "word/numbering.xml" in zin.namelist()
+        for part in discover_header_footer_part_paths_from_namelist(zin.namelist()):
+            header_footer_raw.append((part, zin.read(part)))
+        t0 = _p("read original document.xml + header/footer raw bytes", t0)
+
     root = ET.fromstring(raw_document_xml)
     apply_body_track_changes_to_document_root(
         root,
-        orig_pkg["document"],
-        rev_pkg["document"],
+        orig_doc_ir,
+        rev_doc_ir,
         config,
         author=author,
         date_iso=date_iso,
         id_counter=id_counter,
         revised_block_elements=rev_doc_blocks,
     )
+    t0 = _p("apply body track changes", t0)
 
     replacements: dict[str, bytes] = {
         DOCUMENT_PART_PATH: serialize_ooxml_part(root, raw_document_xml),
     }
+    t0 = _p("serialize document.xml", t0)
 
     empty_ir: BodyIR = {"version": 1, "blocks": []}
-    with zipfile.ZipFile(orig_path, "r") as zin:
-        for part in discover_header_footer_part_paths_from_namelist(zin.namelist()):
-            raw_hf = zin.read(part)
-            hf_root = ET.fromstring(raw_hf)
-            o_ir = orig_pkg["header_footer"].get(part, empty_ir)
-            r_ir = rev_pkg["header_footer"].get(part, empty_ir)
-            rev_hf_el = rev_hf_blocks.get(part)
-            apply_track_changes_to_hdr_ftr_root(
-                hf_root,
-                o_ir,
-                r_ir,
-                config,
-                author=author,
-                date_iso=date_iso,
-                id_counter=id_counter,
-                revised_block_elements=rev_hf_el,
-            )
-            replacements[part] = serialize_ooxml_part(hf_root, raw_hf)
+    for part, raw_hf in header_footer_raw:
+        hf_root = ET.fromstring(raw_hf)
+        o_ir = orig_header_footer.get(part, empty_ir)
+        r_ir = rev_header_footer.get(part, empty_ir)
+        rev_hf_el = rev_hf_blocks.get(part)
+        apply_track_changes_to_hdr_ftr_root(
+            hf_root,
+            o_ir,
+            r_ir,
+            config,
+            author=author,
+            date_iso=date_iso,
+            id_counter=id_counter,
+            revised_block_elements=rev_hf_el,
+        )
+        replacements[part] = serialize_ooxml_part(hf_root, raw_hf)
+    t0 = _p("header/footer track changes + serialize", t0)
 
     # Keep numbering definitions in sync with any revised paragraph properties we
     # copied (for example list bullets inside table cells). Without this, revised
@@ -4925,6 +5019,12 @@ def emit_docx_with_package_track_changes(
         replacements["word/numbering.xml"] = revised_numbering_xml
 
     write_docx_copy_with_part_replacements(orig_path, out_path, replacements)
+    _p("write output docx (zip copy + replacements)", t0)
+    if profile:
+        print(
+            f"[merck-compare profile] emit total: {time.perf_counter() - t_all:.3f}s",
+            file=sys.stderr,
+        )
 
 
 def emit_docx_with_body_track_changes(

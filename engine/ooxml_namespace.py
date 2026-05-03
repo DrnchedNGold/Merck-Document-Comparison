@@ -18,8 +18,8 @@ import xml.etree.ElementTree as ET
 
 _XML_DECL_RE = re.compile(r"^<\?xml[^>]*\?>\s*", re.DOTALL)
 _XMLNS_RE = re.compile(r'\sxmlns:([A-Za-z0-9._-]+)="([^"]*)"')
-# First-line root for main document / header / footer parts.
-_ROOT_OPEN_RE = re.compile(r"(<w:(?:document|hdr|ftr)\b[^>]*>)")
+# First-line root for main document / header / footer / settings parts.
+_ROOT_OPEN_RE = re.compile(r"(<w:(?:document|hdr|ftr|settings)\b[^>]*>)")
 
 
 def strip_xml_declaration(xml_text: str) -> str:
@@ -126,7 +126,7 @@ def serialize_ooxml_part(root: ET.Element, original_raw_xml: bytes) -> bytes:
     ser = strip_xml_declaration(ser)
     m_ser = _ROOT_OPEN_RE.match(ser)
     if not m_ser:
-        raise ValueError(f"Expected w:document / w:hdr / w:ftr root, got: {ser[:120]!r}")
+        raise ValueError(f"Expected w:document / w:hdr / w:ftr / w:settings root, got: {ser[:120]!r}")
     inner = ser[m_ser.end() :]
 
     decl = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'

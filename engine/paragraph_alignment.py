@@ -861,6 +861,7 @@ def _repair_alignment_unmatched_rev_expansion_override(
     r_txts = [_block_alignment_text(revised, j, config) for j in range(n)]
     orig_sigs = [_block_signature(original, i, config) for i in range(m)]
     rev_sigs = [_block_signature(revised, j, config) for j in range(n)]
+    rank_cache: dict[tuple[int, int], float] = {}
 
     def _orig_only_step_index(oi_del: int) -> int | None:
         for j, a2 in enumerate(alignment):
@@ -874,7 +875,11 @@ def _repair_alignment_unmatched_rev_expansion_override(
         candidates = [i for i in range(m) if abs(i - rj) <= slack]
         ranked: list[tuple[int, float]] = []
         for c in candidates:
-            s = _pair_rank_similarity_best_candidate(c, rj, o_txts, r_txts, ob, rb)
+            key = (c, rj)
+            s = rank_cache.get(key)
+            if s is None:
+                s = _pair_rank_similarity_best_candidate(c, rj, o_txts, r_txts, ob, rb)
+                rank_cache[key] = s
             ranked.append((c, s))
         if not ranked:
             return None
@@ -1194,6 +1199,8 @@ def _blocks_align_in_lcs(
     n: int,
     o_txts: list[str],
     r_txts: list[str],
+    o_tok_keys: list[list[str]] | None = None,
+    r_tok_keys: list[list[str]] | None = None,
     cache: dict[tuple[int, int], bool],
     skip_length_ratio: bool = False,
 ) -> bool:
@@ -1234,12 +1241,6 @@ def _blocks_align_in_lcs(
         or (not lo or not lr)
         or (min(lo, lr) / max(lo, lr) >= length_floor)
     )
-    sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
-    q = sm.quick_ratio()
-    # Performance: length-weak pairs with almost no shared structure skip heavy tok ratio.
-    if not length_ok and lo and lr and q < _ALIGN_LENGTH_WEAK_FAST_REJECT_QUICK:
-        cache[key] = False
-        return False
     if _toc_slot_pair_relaxed_align(o_txt, r_txt):
         cache[key] = True
         return True
@@ -1269,13 +1270,56 @@ def _blocks_align_in_lcs(
     ):
         cache[key] = True
         return True
+
+    # Defer expensive difflib work until after cheap accept gates above.
+    sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
+    q = sm.quick_ratio()
+    # Performance: length-weak pairs with almost no shared structure skip heavy tok ratio.
+    if not length_ok and lo and lr and q < _ALIGN_LENGTH_WEAK_FAST_REJECT_QUICK:
+        cache[key] = False
+        return False
     skip_char_ratio = _should_skip_expensive_char_ratio(
         lo, lr, body_block_count=max(m, n)
     )
-    char_r = 0.0 if skip_char_ratio else sm.ratio()
-    ot = norm_keys(tokenize_for_lcs(o_txt))
-    rt = norm_keys(tokenize_for_lcs(r_txt))
-    tok_r = difflib.SequenceMatcher(None, ot, rt, autojunk=False).ratio()
+    # Performance: tokenization is deterministic and expensive. When available,
+    # reuse per-block token keys instead of re-tokenizing for every compared pair.
+    if o_tok_keys is not None and r_tok_keys is not None:
+        ot = o_tok_keys[oi]
+        rt = r_tok_keys[rj]
+    else:
+        ot = norm_keys(tokenize_for_lcs(o_txt))
+        rt = norm_keys(tokenize_for_lcs(r_txt))
+    tok_sm = difflib.SequenceMatcher(None, ot, rt, autojunk=False)
+    tok_q = tok_sm.quick_ratio()
+
+    # If neither the character nor token quick upper bounds can possibly reach the
+    # minimum threshold for this pair, avoid the quadratic ``ratio()`` call.
+    if not length_ok and both_paragraph:
+        combined_min = _ALIGN_LENGTH_BYPASS_COMBINED_MIN
+    elif both_paragraph and index_skew <= _MAX_INDEX_SKEW_FOR_SOFT_FUZZY:
+        combined_min = _ALIGN_FUZZY_COMBINED_SOFT_MIN
+    else:
+        combined_min = _ALIGN_FUZZY_COMBINED_MIN
+
+    if max(q, tok_q) < combined_min:
+        # Still allow the length-weak token-bypass path to proceed if its quick gate
+        # could pass; otherwise this cannot match.
+        if not (
+            (not length_ok and both_paragraph)
+            and q >= _ALIGN_LENGTH_BYPASS_TOK_QUICK_MIN
+            and tok_q >= _ALIGN_LENGTH_BYPASS_TOK_MIN
+        ):
+            cache[key] = False
+            return False
+
+    # Compute the expensive token ratio only when it could affect the outcome.
+    tok_r = tok_sm.ratio() if tok_q >= min(combined_min, _ALIGN_LENGTH_BYPASS_TOK_MIN) else 0.0
+    # Performance: ratio() is expensive; quick_ratio() is a cheap upper bound.
+    # If q <= tok_r then char_r cannot exceed tok_r and cannot change max(char_r, tok_r).
+    if skip_char_ratio or q <= tok_r:
+        char_r = 0.0
+    else:
+        char_r = sm.ratio()
     combined = tok_r if skip_char_ratio else max(char_r, tok_r)
     if q >= _ALIGN_FUZZY_QUICK_MIN and combined >= _ALIGN_FUZZY_COMBINED_MIN:
         ok = True
@@ -2033,7 +2077,12 @@ def _raw_max_char_tok_ratio(
         len(o_txt), len(r_txt), body_block_count=body_block_count
     ):
         return float(tok_r)
+    # Performance: ratio() is expensive, but quick_ratio() is a cheap upper bound.
+    # If quick_ratio <= tok_r then char_r cannot exceed tok_r, so char_r cannot
+    # change max(char_r, tok_r).
     sm = difflib.SequenceMatcher(None, o_txt, r_txt, autojunk=False)
+    if sm.quick_ratio() <= tok_r:
+        return float(tok_r)
     char_r = sm.ratio()
     return float(max(char_r, tok_r))
 
@@ -2102,6 +2151,10 @@ def _align_paragraphs_compute(
     m, n = len(orig_sigs), len(rev_sigs)
     o_txts = [_block_alignment_text(original, i, config) for i in range(m)]
     r_txts = [_block_alignment_text(revised, j, config) for j in range(n)]
+    # Performance: LCS alignment calls fuzzy match on many (oi, rj) pairs. Precompute
+    # token norm keys once per block so we don't re-tokenize inside difflib.
+    o_tok_keys = [norm_keys(tokenize_for_lcs(t)) for t in o_txts]
+    r_tok_keys = [norm_keys(tokenize_for_lcs(t)) for t in r_txts]
     align_cache: dict[tuple[int, int], bool] = {}
 
     def aligned(oi: int, rj: int) -> bool:
@@ -2133,6 +2186,8 @@ def _align_paragraphs_compute(
                 n=n,
                 o_txts=o_txts,
                 r_txts=r_txts,
+                o_tok_keys=o_tok_keys,
+                r_tok_keys=r_tok_keys,
                 cache=align_cache,
                 skip_length_ratio=True,
             ):
@@ -2152,6 +2207,8 @@ def _align_paragraphs_compute(
             n=n,
             o_txts=o_txts,
             r_txts=r_txts,
+            o_tok_keys=o_tok_keys,
+            r_tok_keys=r_tok_keys,
             cache=align_cache,
             skip_length_ratio=False,
         )

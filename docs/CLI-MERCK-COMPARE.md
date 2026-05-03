@@ -29,7 +29,7 @@ Implementation: [`engine/compare_cli.py`](../engine/compare_cli.py).
 
 ```text
 merck-compare --original PATH --revised PATH --output PATH
-              [--config PATH] [--author NAME] [--date-iso ISO8601]
+              [--config PATH] [--author NAME] [--date-iso ISO8601] [--profile]
 ```
 
 All of `--original`, `--revised`, and `--output` are **required** unless you only run `--help`.
@@ -46,6 +46,7 @@ All of `--original`, `--revised`, and `--output` are **required** unless you onl
 | `--config` | Optional JSON file describing a `CompareConfig` (see below). If omitted, defaults match `engine.DEFAULT_WORD_LIKE_COMPARE_CONFIG`. |
 | `--author` | String stored as revision author in emitted markup (default: `MerckDocCompare`). |
 | `--date-iso` | Optional fixed `w:date` for reproducible runs, e.g. `2026-03-28T12:00:00Z`. |
+| `--profile` | Print phase timings for document generation to **stderr** (diagnostics only; does not change output). |
 
 Run **`merck-compare --help`** for the same summary and the exit-code epilog.
 

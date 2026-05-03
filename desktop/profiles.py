@@ -104,7 +104,7 @@ def default_word_track_changes_options() -> dict[str, int]:
     }
 
 
-def _validate_word_track_changes_options(raw: Any) -> dict[str, int]:
+def validate_word_track_changes_options(raw: Any) -> dict[str, int]:
     if raw is None:
         return default_word_track_changes_options()
     if not isinstance(raw, dict):
@@ -155,7 +155,7 @@ def load_profile_bundle(
 
     cfg = config_from_profile_payload(payload)
     if isinstance(payload, dict) and "compare_config" in payload:
-        word_opts = _validate_word_track_changes_options(payload.get("word_track_changes_options"))
+        word_opts = validate_word_track_changes_options(payload.get("word_track_changes_options"))
         prof_name = payload.get("profile_name", path.name)
         if not isinstance(prof_name, str) or not prof_name.strip():
             prof_name = path.name
